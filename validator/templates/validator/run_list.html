@@ -1,0 +1,27 @@
+{% extends "validator/base.html" %}
+{% block title %}History{% endblock %}
+{% block content %}
+<div class="heading"><h1>History</h1></div>
+<form method="get" class="filters inline">
+  <select name="project" aria-label="Project"><option value="">All projects</option>{% for p in project_names %}<option {% if p == project %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+  <select name="database" aria-label="Database"><option value="">All databases</option>{% for d in database_names %}<option {% if d == database %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
+  <button class="button" type="submit">Filter</button>
+</form>
+{% if runs %}
+<table class="list">
+  <thead><tr><th>When</th><th>Project @ branch</th><th>Database</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for run in runs %}
+    <tr>
+      <td><a href="{% url 'run_detail' run.pk %}">{{ run.started_at|date:"Y-m-d H:i" }}</a></td>
+      <td class="mono">{{ run.project_name }} @ {{ run.git_branch }} <span class="muted">{{ run.git_commit }}</span></td>
+      <td class="mono">{{ run.database_name }}</td>
+      <td>{% if run.status == 'error' %}<span class="failed">run failed</span>{% else %}{% include "validator/_summary_pills.html" with summary=run.summary %}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No runs match. <a href="{% url 'dashboard' %}">Run a comparison.</a></p>
+{% endif %}
+{% endblock %}

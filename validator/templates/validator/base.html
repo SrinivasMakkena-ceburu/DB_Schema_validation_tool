@@ -1,0 +1,35 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Schema Sync{% endblock %} · Schema Sync</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'validator/app.css' %}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark" aria-hidden="true">±</span> Schema Sync</a>
+    {% with name=request.resolver_match.url_name %}
+    <nav aria-label="Main">
+      <a href="{% url 'dashboard' %}" {% if name == 'dashboard' or name == 'batch_detail' %}aria-current="page"{% endif %}>Compare</a>
+      <a href="{% url 'run_list' %}" {% if name == 'run_list' or name == 'run_detail' %}aria-current="page"{% endif %}>History</a>
+      <a href="{% url 'project_list' %}" {% if 'project' in name %}aria-current="page"{% endif %}>Projects</a>
+      <a href="{% url 'database_list' %}" {% if 'database' in name %}aria-current="page"{% endif %}>Databases</a>
+    </nav>
+    {% endwith %}
+    <span class="readonly-badge" title="Target databases are opened in read-only sessions. Fix SQL is generated, never run.">read-only</span>
+  </header>
+  <main class="page">
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}<li class="msg msg-{{ message.tags }}">{{ message }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{% static 'validator/app.js' %}"></script>
+</body>
+</html>

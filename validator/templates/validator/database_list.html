@@ -1,0 +1,26 @@
+{% extends "validator/base.html" %}
+{% block title %}Databases{% endblock %}
+{% block content %}
+<div class="heading row"><h1>Databases</h1><a class="button primary" href="{% url 'database_create' %}">Add database</a></div>
+{% if databases %}
+<table class="list">
+  <thead><tr><th>Name</th><th>Connection</th><th>Notes</th><th></th></tr></thead>
+  <tbody>
+  {% for d in databases %}
+    <tr>
+      <td><strong>{{ d.name }}</strong></td>
+      <td class="mono small">{{ d.user }}@{{ d.host }}:{{ d.port }}/{{ d.dbname }}<br><span class="muted">schema {{ d.schema }} · sslmode {{ d.sslmode }} · {% if d.has_password %}password saved{% else %}uses ~/.pgpass{% endif %}</span></td>
+      <td class="small">{{ d.notes|linebreaksbr }}</td>
+      <td class="actions">
+        <form method="post" action="{% url 'database_test' d.pk %}">{% csrf_token %}<button class="button" type="submit">Test connection</button></form>
+        <a class="button ghost" href="{% url 'database_edit' d.pk %}">Edit</a>
+        <a class="button ghost danger" href="{% url 'database_delete' d.pk %}">Delete</a>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><p>Add each environment's PostgreSQL database. A user with read access is enough: sessions are opened read-only.</p><a class="button primary" href="{% url 'database_create' %}">Add database</a></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "validator/base.html" %}
+{% block title %}Compare{% endblock %}
+{% block content %}
+<div class="split">
+  <section class="panel">
+    <h1>Compare a branch with environments</h1>
+    <p class="lede">Reads the models and migration files in the project folder (whatever branch is checked out) and compares them with each database you pick.</p>
+    {% if not has_projects or not has_databases %}
+      <div class="empty">
+        {% if not has_projects %}<p><a class="button" href="{% url 'project_create' %}">Add a project</a> — the folder of your Django checkout and its venv Python.</p>{% endif %}
+        {% if not has_databases %}<p><a class="button" href="{% url 'database_create' %}">Add a database</a> — stage, prod-eu, prod-us…</p>{% endif %}
+      </div>
+    {% else %}
+    <form method="post" class="stack" data-busy-form>
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <div class="field">
+        <label for="{{ form.project.id_for_label }}">Project</label>
+        {{ form.project }}
+        {{ form.project.errors }}
+      </div>
+      <fieldset class="field">
+        <legend>Databases</legend>
+        <div class="checks">{% for choice in form.databases %}<label class="check">{{ choice.tag }} <span>{{ choice.choice_label }}</span></label>{% endfor %}</div>
+        {{ form.databases.errors }}
+      </fieldset>
+      <fieldset class="field">
+        <legend>Migration history in the fix script</legend>
+        {% for choice in form.history_strategy %}<label class="check">{{ choice.tag }} <span>{{ choice.choice_label }}</span></label>{% endfor %}
+        <label class="check">{{ form.include_other_apps }} <span>{{ form.include_other_apps.label }}</span></label>
+      </fieldset>
+      <button type="submit" class="button primary">Run comparison</button>
+      <p class="hint busy-hint" hidden>Importing the project and inspecting databases…</p>
+    </form>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Recent comparisons</h2>
+    {% if batches %}
+      <ul class="batch-list">
+      {% for batch in batches %}
+        <li>
+          <a href="{% url 'batch_detail' batch.id %}">
+            <span class="mono">{{ batch.first.project_name }} @ {{ batch.first.git_branch }}</span>
+            <span class="muted">{{ batch.first.started_at|date:"M j, H:i" }}</span>
+          </a>
+          <div class="env-row">
+            {% for run in batch.runs %}
+              <span class="env-chip {% if run.status == 'error' %}is-failed{% elif run.summary.error %}has-error{% elif run.summary.warning %}has-warning{% else %}is-clean{% endif %}">{{ run.database_name }}</span>
+            {% endfor %}
+          </div>
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No comparisons yet. Results are kept here so you can compare later runs with earlier ones.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

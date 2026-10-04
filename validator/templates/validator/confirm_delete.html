@@ -1,0 +1,12 @@
+{% extends "validator/base.html" %}
+{% block title %}Delete {{ object.name }}{% endblock %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Delete {{ kind }} {{ object.name }}?</h1>
+  <p>Past comparison runs stay in History.</p>
+  <form method="post" class="row">{% csrf_token %}
+    <button type="submit" class="button danger-solid">Delete {{ kind }}</button>
+    <a class="button ghost" href="{% url cancel %}">Cancel</a>
+  </form>
+</section>
+{% endblock %}

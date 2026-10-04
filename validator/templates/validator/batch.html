@@ -1,0 +1,49 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}{{ first.project_name }} vs {{ runs|length }} database{{ runs|length|pluralize }}{% endblock %}
+{% block content %}
+<div class="heading">
+  <h1><span class="mono">{{ first.project_name }}</span> <span class="at">@</span> <span class="mono">{{ first.git_branch }}</span> <span class="muted mono">{{ first.git_commit }}</span></h1>
+  <p class="muted">{{ first.started_at|date:"Y-m-d H:i" }} · history strategy: {{ first.options.history_strategy }}</p>
+</div>
+
+<div class="matrix-wrap">
+<table class="matrix">
+  <thead>
+    <tr>
+      <th scope="col" class="corner">Finding</th>
+      {% for run in runs %}
+        <th scope="col"><a href="{% url 'run_detail' run.pk %}">{{ run.database_name }}</a></th>
+      {% endfor %}
+    </tr>
+    <tr class="totals">
+      <th scope="row">Total</th>
+      {% for run in runs %}
+        <td>{% if run.status == 'error' %}<span class="failed">run failed</span>{% else %}{% include "validator/_summary_pills.html" with summary=run.summary %}{% endif %}</td>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+      <tr>
+        <th scope="row"><span class="marker m-{{ row.category|marker_class }}" aria-hidden="true">{{ row.category|marker }}</span> {{ row.category|category_label }}</th>
+        {% for cell in row.cells %}
+          <td>{% if cell %}{% if cell.error %}<span class="pill sev-error">{{ cell.error }}</span>{% endif %}{% if cell.warning %}<span class="pill sev-warning">{{ cell.warning }}</span>{% endif %}{% if cell.info %}<span class="pill sev-info">{{ cell.info }}</span>{% endif %}{% else %}<span class="dash">—</span>{% endif %}</td>
+        {% endfor %}
+      </tr>
+    {% empty %}
+      <tr><td colspan="{{ runs|length|add:1 }}" class="clean-row">No differences: every database matches the branch.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% for run in runs %}{% if run.status == 'error' %}
+  <section class="panel error-panel">
+    <h2>{{ run.database_name }}: run failed</h2>
+    <pre class="trace">{{ run.error }}</pre>
+  </section>
+{% endif %}{% endfor %}
+
+{% include "validator/_legend.html" %}
+{% endblock %}

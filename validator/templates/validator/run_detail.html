@@ -1,0 +1,79 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}{{ run.database_name }} · {{ run.project_name }}{% endblock %}
+{% block content %}
+<div class="heading">
+  <p class="crumbs"><a href="{% url 'batch_detail' run.batch_id %}">← all databases in this comparison</a>
+    {% for s in siblings %}· <a href="{% url 'run_detail' s.pk %}">{{ s.database_name }}</a> {% endfor %}</p>
+  <h1><span class="mono">{{ run.project_name }}</span> <span class="at">@</span> <span class="mono">{{ run.git_branch }}</span> <span class="arrow">→</span> <span class="mono">{{ run.database_name }}</span></h1>
+  <p class="muted">commit <span class="mono">{{ run.git_commit }}</span> · {{ run.started_at|date:"Y-m-d H:i" }} · {{ run.duration_ms }} ms
+    {% if report.meta %}· Django {{ report.meta.django_version }} · {{ report.meta.models }} models · {{ report.meta.db_tables }} tables · {{ report.meta.history_rows }} history rows{% endif %}</p>
+</div>
+
+{% if run.status == 'error' %}
+  <section class="panel error-panel">
+    <h2>The comparison could not run</h2>
+    <pre class="trace">{{ run.error }}</pre>
+  </section>
+{% else %}
+  {% for note in report.notes %}<div class="msg msg-warning"><pre class="note">{{ note }}</pre></div>{% endfor %}
+
+  <div class="tabs" role="tablist">
+    <a role="tab" href="#schema" class="tab">Schema {% include "validator/_summary_pills.html" with summary=run.summary.sections.schema %}</a>
+    <a role="tab" href="#migrations" class="tab">Migrations {% include "validator/_summary_pills.html" with summary=run.summary.sections.migrations %}</a>
+    <a role="tab" href="#pending" class="tab">Without migration <span class="pills"><span class="pill sev-warning">{{ report.pending|length }}</span></span></a>
+    <a role="tab" href="#fix" class="tab">Fix SQL</a>
+  </div>
+
+  <div class="filters" data-filters>
+    <label class="check"><input type="checkbox" value="error" checked> errors</label>
+    <label class="check"><input type="checkbox" value="warning" checked> warnings</label>
+    <label class="check"><input type="checkbox" value="info" checked> info</label>
+    <input type="search" placeholder="Filter by table, column, app…" aria-label="Filter findings">
+  </div>
+
+  <section id="schema" class="tabpanel" role="tabpanel">
+    {% include "validator/_findings.html" with findings=report.schema empty="Every table, column and constraint the models need is in the database." %}
+  </section>
+
+  <section id="migrations" class="tabpanel" role="tabpanel">
+    <table class="apps">
+      <thead><tr><th>App</th><th>Latest in branch</th><th>Latest recorded in DB</th><th class="num">Rows</th><th class="num">Not in branch</th><th class="num">Not applied</th></tr></thead>
+      <tbody>
+      {% for app, info in report.per_app.items %}
+        <tr class="{% if not info.installed %}not-installed{% endif %}">
+          <td class="mono">{{ app }}{% if not info.installed %} <span class="tag">not in branch</span>{% endif %}</td>
+          <td class="mono">{{ info.disk_leaf|join:", "|default:"—" }}</td>
+          <td class="mono">{{ info.db_latest|default:"—" }}</td>
+          <td class="num">{{ info.recorded }}</td>
+          <td class="num">{% if info.ghosts %}<span class="pill sev-error">{{ info.ghosts }}</span>{% else %}0{% endif %}</td>
+          <td class="num">{% if info.unapplied %}<span class="pill sev-info">{{ info.unapplied }}</span>{% else %}0{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% include "validator/_findings.html" with findings=report.migrations empty="django_migrations matches the migration files in this branch." %}
+  </section>
+
+  <section id="pending" class="tabpanel" role="tabpanel">
+    <p class="muted">Model changes in this branch that no migration file covers — what <code>makemigrations --check</code> would report. Create these migrations before deploying.</p>
+    {% include "validator/_findings.html" with findings=report.pending empty="Every model change in this branch has a migration file." %}
+  </section>
+
+  <section id="fix" class="tabpanel" role="tabpanel">
+    <div class="toolbar">
+      <a class="button" href="{% url 'run_fix_sql' run.pk %}">Download .sql</a>
+      <button type="button" class="button" data-copy="#fix-sql">Copy SQL</button>
+      <a class="button ghost" href="{% url 'run_report_json' run.pk %}">Download report .json</a>
+    </div>
+    <p class="hint">Generated, not executed. Review it, then run it yourself (for example with <code>psql -f</code>) against <strong>{{ run.database_name }}</strong>.</p>
+    <pre class="sql" id="fix-sql">{{ run.fix_sql }}</pre>
+    {% if report.commands %}
+      <h3>Equivalent manage.py commands for the history part</h3>
+      <pre class="sql">{% for c in report.commands %}{{ c }}
+{% endfor %}</pre>
+    {% endif %}
+  </section>
+  {% include "validator/_legend.html" %}
+{% endif %}
+{% endblock %}

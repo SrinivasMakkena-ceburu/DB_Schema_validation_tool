@@ -1,0 +1,19 @@
+{% load validator_tags %}
+{% if findings %}
+<table class="findings" data-filterable>
+  <thead><tr><th class="gutter" aria-label="Kind"></th><th>Severity</th><th>App</th><th>Object</th><th>Finding</th></tr></thead>
+  <tbody>
+  {% for f in findings %}
+    <tr data-severity="{{ f.severity }}" data-text="{{ f.app }} {{ f|finding_object }} {{ f.message }} {{ f.category }}">
+      <td class="gutter marker m-{{ f.category|marker_class }}" title="{{ f.category|category_label }}">{{ f.category|marker }}</td>
+      <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+      <td class="mono">{{ f.app }}</td>
+      <td class="mono">{{ f|finding_object }}</td>
+      <td>{{ f.message }}{% if f.data.names %}<details><summary>{{ f.data.names|length }} row{{ f.data.names|length|pluralize }}</summary><span class="mono small">{{ f.data.names|join:", " }}</span></details>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="clean">{{ empty }}</p>
+{% endif %}

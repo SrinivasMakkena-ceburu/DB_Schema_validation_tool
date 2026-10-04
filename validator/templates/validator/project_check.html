@@ -1,0 +1,27 @@
+{% extends "validator/base.html" %}
+{% block title %}Check {{ project.name }}{% endblock %}
+{% block content %}
+<div class="heading"><h1>Check import: {{ project.name }}</h1></div>
+{% if error %}
+  <section class="panel error-panel">
+    <h2>The project could not be imported</h2>
+    <p>Fix the settings module, interpreter or extra environment variables on the <a href="{% url 'project_edit' project.pk %}">project</a>, then check again.</p>
+    <pre class="trace">{{ error }}</pre>
+  </section>
+{% else %}
+  <section class="panel">
+    <p class="ok-line">Imported with Django {{ data.django_version }} using <span class="mono">{{ data.settings_module }}</span>.</p>
+    <dl class="facts">
+      <div><dt>Apps</dt><dd>{{ data.apps|length }}</dd></div>
+      <div><dt>Tables from models</dt><dd>{{ data.models|length }}</dd></div>
+      <div><dt>Migration files</dt><dd>{{ migration_count }}</dd></div>
+      <div><dt>Changes without migration</dt><dd>{{ pending_count }}</dd></div>
+    </dl>
+    {% if data.pending_changes %}
+      <h3>Changes without a migration file</h3>
+      <ul class="mono small">{% for app, ops in data.pending_changes.items %}{% for op in ops %}<li>{{ app }}: {{ op }}</li>{% endfor %}{% endfor %}</ul>
+    {% endif %}
+  </section>
+{% endif %}
+<p><a href="{% url 'project_list' %}">← Projects</a></p>
+{% endblock %}

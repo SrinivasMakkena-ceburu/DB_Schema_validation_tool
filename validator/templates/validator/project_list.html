@@ -1,0 +1,26 @@
+{% extends "validator/base.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<div class="heading row"><h1>Projects</h1><a class="button primary" href="{% url 'project_create' %}">Add project</a></div>
+{% if projects %}
+<table class="list">
+  <thead><tr><th>Name</th><th>Folder</th><th>Checked out</th><th></th></tr></thead>
+  <tbody>
+  {% for p in projects %}
+    <tr>
+      <td><strong>{{ p.name }}</strong></td>
+      <td class="mono small">{{ p.path }}<br><span class="muted">{{ p.python_path }}</span></td>
+      <td class="mono">{{ p.branch }} <span class="muted">{{ p.commit }}</span></td>
+      <td class="actions">
+        <form method="post" action="{% url 'project_check' p.pk %}" data-busy-form>{% csrf_token %}<button class="button" type="submit">Check import</button></form>
+        <a class="button ghost" href="{% url 'project_edit' p.pk %}">Edit</a>
+        <a class="button ghost danger" href="{% url 'project_delete' p.pk %}">Delete</a>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><p>Add the folder of your Django backend checkout and the Python interpreter from its venv. The tool reads whatever branch is checked out there.</p><a class="button primary" href="{% url 'project_create' %}">Add project</a></div>
+{% endif %}
+{% endblock %}

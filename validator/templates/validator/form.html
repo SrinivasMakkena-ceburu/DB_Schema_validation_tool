@@ -1,0 +1,27 @@
+{% extends "validator/base.html" %}
+{% block title %}{% if object %}Edit {{ object.name }}{% else %}Add {{ kind }}{% endif %}{% endblock %}
+{% block content %}
+<section class="panel narrow">
+  <h1>{% if object %}Edit {{ kind }} {{ object.name }}{% else %}Add {{ kind }}{% endif %}</h1>
+  <form method="post" class="stack">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <div class="field{% if field.errors %} has-error{% endif %}">
+        {% if field.field.widget.input_type == 'checkbox' %}
+          <label class="check">{{ field }} <span>{{ field.label }}</span></label>
+        {% else %}
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+        {% endif %}
+        {% if field.help_text %}<p class="hint">{{ field.help_text }}</p>{% endif %}
+        {{ field.errors }}
+      </div>
+    {% endfor %}
+    <div class="row">
+      <button type="submit" class="button primary">Save {{ kind }}</button>
+      <a class="button ghost" href="{% url cancel %}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
