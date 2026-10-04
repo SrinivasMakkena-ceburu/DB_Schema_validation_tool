@@ -1,5 +1,5 @@
 <span class="pills">
-  <span class="pill sev-error" title="errors">{{ summary.error|default:0 }}</span>
-  <span class="pill sev-warning" title="warnings">{{ summary.warning|default:0 }}</span>
-  <span class="pill sev-info" title="info">{{ summary.info|default:0 }}</span>
+  <span class="pill sev-error{% if not summary.error %} is-zero{% endif %}" title="errors">{{ summary.error|default:0 }}</span>
+  <span class="pill sev-warning{% if not summary.warning %} is-zero{% endif %}" title="warnings">{{ summary.warning|default:0 }}</span>
+  <span class="pill sev-info{% if not summary.info %} is-zero{% endif %}" title="info">{{ summary.info|default:0 }}</span>
 </span>

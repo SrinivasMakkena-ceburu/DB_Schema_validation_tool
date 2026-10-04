@@ -219,3 +219,7 @@ pre.trace { white-space: pre-wrap; max-height: 480px; overflow-y: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 .filters[hidden] { display: none; }
+.field > label.check { font-weight: 400; font-size: 0.95rem; }
+.stack > .button { justify-self: start; }
+.matrix thead .totals th { text-align: left; }
+.pill.is-zero { color: var(--muted); background: transparent; font-weight: 400; }

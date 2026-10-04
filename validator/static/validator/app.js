@@ -25,6 +25,7 @@
       });
     });
     showTab(location.hash.slice(1));
+    window.addEventListener("hashchange", function () { showTab(location.hash.slice(1)); });
   }
 
   // Severity and text filter for findings tables.
