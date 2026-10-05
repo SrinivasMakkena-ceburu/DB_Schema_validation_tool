@@ -5,7 +5,7 @@ import os
 print("settings loaded")
 
 SECRET_KEY = os.environ["SAMPLE_SECRET_KEY"]
-INSTALLED_APPS = ["django.contrib.contenttypes", "catalog", "orders"]
+INSTALLED_APPS = ["django.contrib.contenttypes", "catalog", "orders", "devices"]
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",

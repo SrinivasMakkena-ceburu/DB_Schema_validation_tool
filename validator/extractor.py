@@ -148,6 +148,7 @@ def describe_model(model, connection):
         "app_label": meta.app_label,
         "model": meta.object_name,
         "db_table": meta.db_table,
+        "pk": meta.pk.column,
         "managed": meta.managed,
         "auto_created": bool(meta.auto_created),
         "columns": columns,
@@ -156,6 +157,53 @@ def describe_model(model, connection):
         "create_sql": create_sql,
         "add_column_sql": add_column_sql,
     }
+
+
+ON_DELETE_NAMES = {"CASCADE", "PROTECT", "RESTRICT", "SET_NULL", "SET_DEFAULT", "DO_NOTHING"}
+
+
+def describe_relations(models):
+    """Every concrete FK / one-to-one with its on_delete, for the cascade planner."""
+    relations = []
+    for model in models:
+        for field in model._meta.local_concrete_fields:
+            if not (field.is_relation and (field.many_to_one or field.one_to_one)):
+                continue
+            target = field.target_field
+            name = getattr(field.remote_field.on_delete, "__name__", "")
+            relations.append({
+                "child_table": model._meta.db_table,
+                "child_column": field.column,
+                "parent_table": target.model._meta.db_table,
+                "parent_column": target.column,
+                "on_delete": name if name in ON_DELETE_NAMES else "CUSTOM",
+                "nullable": field.null,
+                "parent_link": bool(field.remote_field.parent_link),
+            })
+    return relations
+
+
+def describe_generic_relations(models):
+    try:
+        from django.contrib.contenttypes.fields import GenericRelation
+    except Exception:  # contenttypes not installed
+        return []
+    out = []
+    for model in models:
+        for field in model._meta.private_fields:
+            if not isinstance(field, GenericRelation):
+                continue
+            child = field.related_model._meta
+            out.append({
+                "parent_table": model._meta.db_table,
+                "parent_app_label": model._meta.app_label,
+                "parent_model": model._meta.model_name,
+                "parent_pk": model._meta.pk.column,
+                "child_table": child.db_table,
+                "ct_column": child.get_field(field.content_type_field_name).column,
+                "object_id_column": child.get_field(field.object_id_field_name).column,
+            })
+    return out
 
 
 def describe_migrations(loader, app_labels):
@@ -216,11 +264,10 @@ def extract(settings_module, project_dir):
     from django.db.migrations.loader import MigrationLoader
 
     app_labels = [config.label for config in apps.get_app_configs()]
-    models = []
-    for model in apps.get_models(include_auto_created=True):
-        if model._meta.proxy or model._meta.swapped:
-            continue
-        models.append(describe_model(model, connection))
+    concrete = [
+        m for m in apps.get_models(include_auto_created=True) if not (m._meta.proxy or m._meta.swapped)
+    ]
+    models = [describe_model(model, connection) for model in concrete]
 
     loader = MigrationLoader(None, ignore_no_migrations=True)
     try:
@@ -234,6 +281,8 @@ def extract(settings_module, project_dir):
         "original_engine": original_engine,
         "apps": app_labels,
         "models": models,
+        "relations": describe_relations(concrete),
+        "generic_relations": describe_generic_relations(concrete),
         "migrations": describe_migrations(loader, app_labels),
         "pending_changes": pending,
         "pending_changes_error": pending_error,

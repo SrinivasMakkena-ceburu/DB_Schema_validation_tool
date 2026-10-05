@@ -31,7 +31,8 @@ def test_reads_tables_columns_constraints(pg_conninfo):
     assert child["columns"]["id"]["type"] == "integer"
     assert child["pk"] == ["id"]
     assert ["parent_id", "name"] in child["uniques"]
-    assert child["fks"] == [{"columns": ["parent_id"], "ref_table": "parent", "ref_columns": ["id"]}]
+    assert child["fks"] == [{"columns": ["parent_id"], "ref_table": "parent", "ref_columns": ["id"],
+                             "on_delete": "a", "deferrable": False}]
     assert ["created"] in child["indexes"]
     # expression indexes are ignored rather than reported as a column set
     assert all(None not in cols for cols in child["uniques"] + child["indexes"])
@@ -79,3 +80,21 @@ def test_bad_credentials(pg_conninfo):
 
 def test_check_connection_returns_version(pg_conninfo):
     assert "PostgreSQL" in check_connection(pg_conninfo)
+
+
+def test_fk_actions_and_sizes(pg_conninfo):
+    pg_execute(pg_conninfo, [
+        "CREATE TABLE p (id int PRIMARY KEY)",
+        "CREATE TABLE c1 (id int PRIMARY KEY, p_id int REFERENCES p(id) DEFERRABLE INITIALLY DEFERRED)",
+        "CREATE TABLE c2 (id int PRIMARY KEY, p_id int REFERENCES p(id) ON DELETE CASCADE)",
+        "CREATE TABLE c3 (id int PRIMARY KEY, p_id int REFERENCES p(id) ON DELETE SET NULL)",
+        "INSERT INTO p SELECT generate_series(1, 100)",
+        "ANALYZE p",
+    ])
+    tables = inspect_database(pg_conninfo, "public")["tables"]
+    assert tables["c1"]["fks"][0]["on_delete"] == "a" and tables["c1"]["fks"][0]["deferrable"] is True
+    assert tables["c2"]["fks"][0]["on_delete"] == "c" and tables["c2"]["fks"][0]["deferrable"] is False
+    assert tables["c3"]["fks"][0]["on_delete"] == "n"
+    assert tables["p"]["estimated_rows"] == 100
+    assert tables["p"]["total_bytes"] > 0
+    assert tables["c1"]["estimated_rows"] is None  # never analysed

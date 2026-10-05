@@ -32,7 +32,9 @@ def check_connection(conninfo):
 
 
 _RELATIONS = """
-SELECT c.relname, c.relkind
+SELECT c.relname, c.relkind,
+       CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END,
+       pg_total_relation_size(c.oid)
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = %(schema)s AND c.relkind IN ('r', 'p', 'v', 'm')
   AND NOT c.relispartition
@@ -56,7 +58,7 @@ SELECT c.relname, con.contype,
   ARRAY(SELECT a.attname FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord)
         JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
         ORDER BY k.ord),
-  fc.relname,
+  fc.relname, con.confdeltype, con.condeferrable,
   ARRAY(SELECT a.attname FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord)
         JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum
         ORDER BY k.ord)
@@ -99,11 +101,12 @@ def inspect_database(conninfo, schema="public"):
                 raise InspectError(f"Schema '{schema}' not found")
 
             tables, views = {}, []
-            for name, kind in conn.execute(_RELATIONS, params):
+            for name, kind, rows, size in conn.execute(_RELATIONS, params):
                 if kind in ("v", "m"):
                     views.append(name)
                 else:
-                    tables[name] = {"columns": {}, "pk": [], "uniques": [], "fks": [], "indexes": []}
+                    tables[name] = {"columns": {}, "pk": [], "uniques": [], "fks": [], "indexes": [],
+                                    "estimated_rows": rows, "total_bytes": size}
 
             for table, column, type_, not_null, has_default in conn.execute(_COLUMNS, params):
                 if table in tables:
@@ -113,7 +116,7 @@ def inspect_database(conninfo, schema="public"):
                         "has_default": has_default,
                     }
 
-            for table, kind, cols, ref_table, ref_cols in conn.execute(_CONSTRAINTS, params):
+            for table, kind, cols, ref_table, on_delete, deferrable, ref_cols in conn.execute(_CONSTRAINTS, params):
                 if table not in tables:
                     continue
                 if kind == "p":
@@ -121,9 +124,10 @@ def inspect_database(conninfo, schema="public"):
                 elif kind == "u":
                     _add_unique(tables[table]["uniques"], list(cols))
                 else:
-                    tables[table]["fks"].append(
-                        {"columns": list(cols), "ref_table": ref_table, "ref_columns": list(ref_cols)}
-                    )
+                    tables[table]["fks"].append({
+                        "columns": list(cols), "ref_table": ref_table, "ref_columns": list(ref_cols),
+                        "on_delete": on_delete, "deferrable": deferrable,
+                    })
 
             for table, unique, primary, partial, cols in conn.execute(_INDEXES, params):
                 cols = list(cols)

@@ -79,3 +79,34 @@ def test_import_error_exits_nonzero(tmp_path):
     assert proc.returncode != 0
     assert "ModuleNotFoundError" in proc.stderr
     assert not out.exists()
+
+
+def relation(data, child_table, child_column):
+    return next(r for r in data["relations"] if r["child_table"] == child_table and r["child_column"] == child_column)
+
+
+def test_relations_with_on_delete(extracted):
+    r = relation(extracted, "devices_execution", "device_id")
+    assert r == {"child_table": "devices_execution", "child_column": "device_id",
+                 "parent_table": "devices_device", "parent_column": "id",
+                 "on_delete": "CASCADE", "nullable": False, "parent_link": False}
+    assert relation(extracted, "devices_execution", "operator_id")["on_delete"] == "SET_NULL"
+    assert relation(extracted, "devices_execution", "operator_id")["nullable"] is True
+    assert relation(extracted, "devices_contract", "customer_id")["on_delete"] == "PROTECT"
+    assert relation(extracted, "devices_auditentry", "device_id")["on_delete"] == "RESTRICT"
+    assert relation(extracted, "devices_device", "parent_id")["parent_table"] == "devices_device"
+    assert relation(extracted, "devices_group_devices", "device_id")["on_delete"] == "CASCADE"
+
+
+def test_mti_parent_link(extracted):
+    r = relation(extracted, "devices_premiumcustomer", "customer_ptr_id")
+    assert r["parent_link"] is True and r["parent_table"] == "devices_customer"
+
+
+def test_generic_relations_and_pk(extracted):
+    assert {"parent_table": "devices_customer", "parent_app_label": "devices", "parent_model": "customer",
+            "parent_pk": "id", "child_table": "devices_note", "ct_column": "content_type_id",
+            "object_id_column": "object_id"} in extracted["generic_relations"]
+    # inherited GenericRelation: notes attached to the subclass's own content type cascade too
+    assert {r["parent_model"] for r in extracted["generic_relations"]} == {"customer", "premiumcustomer"}
+    assert model(extracted, "devices_premiumcustomer")["pk"] == "customer_ptr_id"
