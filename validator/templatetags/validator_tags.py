@@ -1,4 +1,7 @@
+import json
+
 from django import template
+from django.utils.safestring import mark_safe
 
 from ..schema_diff import finding_object as _finding_object
 
@@ -59,3 +62,41 @@ MARKER_CLASSES = {"+": "need", "−": "extra", "~": "diff", "!": "broken", "?": 
 @register.filter
 def marker_class(category):
     return MARKER_CLASSES.get(marker(category), "")
+
+
+ACTION_LABELS = {
+    "cascade": "deleted (cascade)",
+    "set_null": "set to NULL",
+    "protect": "PROTECT",
+    "restrict": "RESTRICT",
+    "block": "blocks the delete",
+    "orphan": "left orphaned",
+    "parent_link": "parent row (inheritance)",
+    "generic": "deleted (generic relation)",
+}
+
+
+@register.filter
+def action_label(action):
+    return ACTION_LABELS.get(action, action)
+
+
+@register.filter
+def cell(value):
+    """A table cell: NULL marker, JSON for structures, long text shortened."""
+    if value is None:
+        return mark_safe('<span class="null">NULL</span>')
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, default=str)
+    else:
+        text = str(value)
+    return text if len(text) <= 120 else text[:117] + "…"
+
+
+@register.filter
+def full_value(value):
+    if value is None:
+        return mark_safe('<span class="null">NULL</span>')
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, default=str, indent=2)
+    return str(value)

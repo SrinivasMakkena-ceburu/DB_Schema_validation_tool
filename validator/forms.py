@@ -2,7 +2,7 @@ from pathlib import Path
 
 from django import forms
 
-from .models import DatabaseTarget, Project
+from .models import CleanupRecipe, DatabaseTarget, Project
 
 
 class ProjectForm(forms.ModelForm):
@@ -83,3 +83,18 @@ class ComparisonForm(forms.Form):
             "history_strategy": self.cleaned_data["history_strategy"],
             "include_other_apps": self.cleaned_data["include_other_apps"],
         }
+
+
+class RecipeForm(forms.ModelForm):
+    class Meta:
+        model = CleanupRecipe
+        fields = ["name", "project", "root_table", "batch_size", "notes"]
+        labels = {"root_table": "Table", "project": "Project (cascade rules)"}
+        widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
+        help_texts = {"batch_size": "Rows of the table deleted per transaction (with their cascades)"}
+
+    def clean_batch_size(self):
+        size = self.cleaned_data["batch_size"]
+        if not 1 <= size <= 100_000:
+            raise forms.ValidationError("Use a batch size between 1 and 100000.")
+        return size

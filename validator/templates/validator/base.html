@@ -16,11 +16,13 @@
     <nav aria-label="Main">
       <a href="{% url 'dashboard' %}" {% if name == 'dashboard' or name == 'batch_detail' %}aria-current="page"{% endif %}>Compare</a>
       <a href="{% url 'run_list' %}" {% if name == 'run_list' or name == 'run_detail' %}aria-current="page"{% endif %}>History</a>
-      <a href="{% url 'project_list' %}" {% if 'project' in name %}aria-current="page"{% endif %}>Projects</a>
-      <a href="{% url 'database_list' %}" {% if 'database' in name %}aria-current="page"{% endif %}>Databases</a>
+      <a href="{% url 'data_home' %}" {% if name|slice:":5" == 'data_' %}aria-current="page"{% endif %}>Data</a>
+      <a href="{% url 'op_list' %}" {% if name|slice:":3" == 'op_' or name|slice:":7" == 'recipe_' or name|slice:":4" == 'job_' %}aria-current="page"{% endif %}>Operations</a>
+      <a href="{% url 'project_list' %}" {% if name|slice:":8" == 'project_' %}aria-current="page"{% endif %}>Projects</a>
+      <a href="{% url 'database_list' %}" {% if name|slice:":9" == 'database_' %}aria-current="page"{% endif %}>Databases</a>
     </nav>
     {% endwith %}
-    <span class="readonly-badge" title="Target databases are opened in read-only sessions. Fix SQL is generated, never run.">read-only</span>
+    <span class="readonly-badge" title="Comparisons and the data browser use read-only sessions. Only confirmed operations on databases with writes enabled change data.">read-only by default</span>
   </header>
   <main class="page">
     {% if messages %}

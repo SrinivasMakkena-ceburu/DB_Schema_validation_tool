@@ -1,0 +1,20 @@
+<div class="filter-editor" data-filter-editor>
+  {% for f in filter_rows %}
+  <div class="filter-row" data-filter-row>
+    {% if columns %}
+      <select name="f_col" aria-label="Column">
+        <option value="">— column —</option>
+        {% for name, type in columns.items %}<option value="{{ name }}" {% if name == f.column %}selected{% endif %}>{{ name }} · {{ type }}</option>{% endfor %}
+      </select>
+    {% else %}
+      <input type="text" name="f_col" value="{{ f.column }}" placeholder="column" aria-label="Column" class="mono">
+    {% endif %}
+    <select name="f_op" aria-label="Operator">
+      {% for key, label in operators.items %}<option value="{{ key }}" {% if key == f.op %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <input type="text" name="f_val" value="{{ f.value }}" placeholder="value" aria-label="Value">
+    <button type="button" class="button ghost icon" data-remove-filter aria-label="Remove condition">×</button>
+  </div>
+  {% endfor %}
+  <button type="button" class="button ghost" data-add-filter>+ Add condition</button>
+</div>

@@ -1,0 +1,7 @@
+{% extends "validator/base.html" %}
+{% block title %}Operations{% endblock %}
+{% block content %}
+<div class="heading row"><h1>Operations log</h1><a class="button" href="{% url 'recipe_list' %}">Cleanup recipes</a></div>
+<p class="lede">Every preview, delete, cleanup and column drop, with who-typed-what, counts, SQL and backups.</p>
+{% if operations %}{% include "validator/_op_table.html" %}{% else %}<p class="muted">No operations yet. Start from a table in <a href="{% url 'data_home' %}">Data</a>.</p>{% endif %}
+{% endblock %}

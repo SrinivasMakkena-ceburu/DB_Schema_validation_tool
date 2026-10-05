@@ -1,0 +1,28 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}Cleanup recipes{% endblock %}
+{% block content %}
+<div class="heading row"><h1>Cleanup recipes</h1><a class="button primary" href="{% url 'recipe_create' %}">New recipe</a></div>
+<p class="lede">Saved cleanups, such as “execution history older than 90 days”. Running one always shows a preview and asks for confirmation first.</p>
+{% if recipes %}
+<table class="list">
+  <thead><tr><th>Name</th><th>Deletes</th><th>Batch</th><th>Run on</th><th></th></tr></thead>
+  <tbody>
+  {% for r in recipes %}
+    <tr>
+      <td><strong>{{ r.name }}</strong>{% if r.notes %}<br><span class="muted small">{{ r.notes }}</span>{% endif %}</td>
+      <td class="small"><span class="mono">{{ r.root_table }}</span> where {% for f in r.filters %}<span class="mono">{{ f.column }} {{ f.op }} {{ f.value }}</span>{% if not forloop.last %} and {% endif %}{% endfor %}<br><span class="muted">cascade rules: {{ r.project.name|default:"database foreign keys only" }}</span></td>
+      <td class="mono">{{ r.batch_size }}</td>
+      <td><form method="post" action="{% url 'recipe_run' r.pk %}" class="row">{% csrf_token %}
+        <select name="database" aria-label="Database">{% for d in databases %}<option value="{{ d.pk }}">{{ d.name }} ({{ d.environment }}){% if not d.writes_enabled %} · read-only{% endif %}</option>{% endfor %}</select>
+        <button class="button danger-outline" type="submit">Preview…</button></form></td>
+      <td class="actions"><a class="button ghost" href="{% url 'recipe_edit' r.pk %}">Edit</a>
+        <form method="post" action="{% url 'recipe_delete' r.pk %}" data-confirm-message="Delete the recipe {{ r.name }}? (No data is deleted.)">{% csrf_token %}<button class="button ghost danger" type="submit">Delete</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><p>No recipes yet. Filter a table in <a href="{% url 'data_home' %}">Data</a> and choose “Save as cleanup recipe”, or create one here.</p><a class="button primary" href="{% url 'recipe_create' %}">New recipe</a></div>
+{% endif %}
+{% endblock %}

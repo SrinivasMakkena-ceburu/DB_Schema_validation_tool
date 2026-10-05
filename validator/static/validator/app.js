@@ -68,3 +68,79 @@
     });
   });
 })();
+
+(function () {
+  // Filter editor: add / remove condition rows.
+  document.querySelectorAll("[data-filter-editor]").forEach(function (editor) {
+    editor.addEventListener("click", function (e) {
+      if (e.target.matches("[data-add-filter]")) {
+        var rows = editor.querySelectorAll("[data-filter-row]");
+        var copy = rows[rows.length - 1].cloneNode(true);
+        copy.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+        copy.querySelectorAll("select").forEach(function (s) { s.selectedIndex = 0; });
+        e.target.before(copy);
+      } else if (e.target.matches("[data-remove-filter]")) {
+        var row = e.target.closest("[data-filter-row]");
+        if (editor.querySelectorAll("[data-filter-row]").length > 1) row.remove();
+        else row.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+      }
+    });
+  });
+
+  // Table search on the tables page.
+  var search = document.querySelector("[data-table-search]");
+  if (search) {
+    search.addEventListener("input", function () {
+      var q = search.value.trim().toLowerCase();
+      document.querySelectorAll("[data-searchable] tbody tr").forEach(function (tr) {
+        tr.hidden = q && tr.dataset.name.indexOf(q) === -1;
+      });
+    });
+  }
+
+  // Danger confirmation: the button stays disabled until the phrase matches exactly.
+  document.querySelectorAll("[data-confirm-form]").forEach(function (form) {
+    var phrase = form.querySelector("[data-phrase]").textContent.trim();
+    var input = form.querySelector("[data-confirm-input]");
+    var ack = form.querySelector("[data-confirm-ack]");
+    var button = form.querySelector("[data-confirm-button]");
+    var check = function () {
+      var ok = input.value.trim() === phrase && (!ack || ack.checked);
+      input.classList.toggle("matches", input.value.trim() === phrase);
+      button.disabled = !ok;
+    };
+    input.addEventListener("input", check);
+    if (ack) ack.addEventListener("change", check);
+    input.addEventListener("paste", function (e) { e.preventDefault(); });  // type it, don't paste it
+    form.addEventListener("submit", function () { button.disabled = true; button.textContent = "Running…"; });
+  });
+
+  // Simple confirm() for low-stakes deletes (recipes).
+  document.querySelectorAll("[data-confirm-message]").forEach(function (form) {
+    form.addEventListener("submit", function (e) {
+      if (!window.confirm(form.dataset.confirmMessage)) e.preventDefault();
+    });
+  });
+
+  // Job page: poll progress, go to the result when done.
+  var jobEl = document.querySelector("[data-job]");
+  if (jobEl && ["queued", "running"].indexOf(jobEl.dataset.jobStatus) !== -1) {
+    var poll = function () {
+      fetch(jobEl.dataset.job, { headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          jobEl.querySelector("[data-job-bar]").style.width = data.progress + "%";
+          jobEl.querySelector("[data-job-state]").textContent = data.status;
+          jobEl.querySelector("[data-job-message]").textContent = data.message;
+          if (data.finished) {
+            if (data.status === "done" && data.result_url) window.location = data.result_url;
+            else window.location.reload();
+          } else {
+            setTimeout(poll, 1000);
+          }
+        })
+        .catch(function () { setTimeout(poll, 3000); });
+    };
+    setTimeout(poll, 800);
+  }
+})();

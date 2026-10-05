@@ -1,0 +1,28 @@
+{% extends "validator/base.html" %}
+{% block title %}{{ database.name }} · Data{% endblock %}
+{% block content %}
+<div class="heading">
+  <p class="crumbs"><a href="{% url 'data_home' %}">Data</a> /</p>
+  <h1><span class="mono">{{ database.name }}</span> {% include "validator/_env.html" with env=database.environment %}
+    {% if database.writes_enabled %}<span class="chip chip-danger">writes enabled</span>{% else %}<span class="chip">read-only</span>{% endif %}</h1>
+  <p class="muted">Cascade rules: {% if project %}<strong>{{ project.name }}</strong>{% else %}database foreign keys only{% endif %} · <a href="{% url 'data_home' %}">change</a></p>
+</div>
+{% if error %}<section class="panel error-panel"><h2>Cannot read this database</h2><pre class="trace">{{ error }}</pre></section>{% endif %}
+{% if tables %}
+<div class="filters inline"><input type="search" placeholder="Find a table…" aria-label="Find a table" data-table-search></div>
+<table class="list" data-searchable>
+  <thead><tr><th>Table</th><th class="num">Rows (estimate)</th><th class="num">Size</th><th class="num">Columns</th></tr></thead>
+  <tbody>
+  {% for name, info in tables %}
+    <tr data-name="{{ name }}">
+      <td><a class="mono" href="{% url 'data_table' database.pk name %}">{{ name }}</a></td>
+      <td class="num mono">{% if info.estimated_rows is None %}<span class="muted">?</span>{% else %}{{ info.estimated_rows }}{% endif %}</td>
+      <td class="num mono">{{ info.total_bytes|filesizeformat }}</td>
+      <td class="num mono">{{ info.columns|length }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if views %}<p class="muted small">Views: <span class="mono">{{ views|join:", " }}</span></p>{% endif %}
+{% endif %}
+{% endblock %}

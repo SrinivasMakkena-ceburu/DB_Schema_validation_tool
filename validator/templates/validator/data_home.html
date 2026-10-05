@@ -1,0 +1,37 @@
+{% extends "validator/base.html" %}
+{% block title %}Data{% endblock %}
+{% block content %}
+<div class="heading row"><h1>Data</h1><a class="button" href="{% url 'recipe_list' %}">Cleanup recipes</a><a class="button ghost" href="{% url 'op_list' %}">Operations log</a></div>
+<p class="lede">Browse tables read-only, then preview and run deletes, cleanups and column drops on databases where writes are enabled.</p>
+
+<section class="panel project-picker">
+  <form method="post" action="{% url 'data_project' %}" class="row">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <label for="project-select"><strong>Cascade rules from</strong></label>
+    <select id="project-select" name="project">
+      <option value="">No project (database foreign keys only)</option>
+      {% for p in projects %}<option value="{{ p.pk }}" {% if project and p.pk == project.pk %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+    </select>
+    <button class="button" type="submit">Use</button>
+  </form>
+  <p class="hint">Django applies <code>on_delete</code> in Python, not in the database. Pick the project whose models describe this database so deletes follow CASCADE / SET_NULL / PROTECT like the app does.</p>
+</section>
+
+<div class="db-grid">
+{% for d in databases %}
+  <a class="db-card env-border-{{ d.environment }}" href="{% url 'data_tables' d.pk %}">
+    <span class="db-card-name mono">{{ d.name }}</span>
+    <span>{% include "validator/_env.html" with env=d.environment %} {% if d.writes_enabled %}<span class="chip chip-danger">writes enabled</span>{% else %}<span class="chip">read-only</span>{% endif %}</span>
+    <span class="muted small mono">{{ d.user }}@{{ d.host }}/{{ d.dbname }}</span>
+  </a>
+{% empty %}
+  <div class="empty"><p>No databases yet.</p><a class="button primary" href="{% url 'database_create' %}">Add database</a></div>
+{% endfor %}
+</div>
+
+{% if operations %}
+<h2 class="section-title">Recent operations</h2>
+{% include "validator/_op_table.html" %}
+{% endif %}
+{% endblock %}

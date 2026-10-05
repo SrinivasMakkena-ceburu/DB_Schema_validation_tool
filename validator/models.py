@@ -266,3 +266,12 @@ class DataOperation(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()} {self.root_table} on {self.database_name}"
+
+    @property
+    def rows_summary(self):
+        if self.kind == "drop_column":
+            return f"{self.plan.get('non_null', '?')} values" if self.plan else ""
+        if self.counts.get("deleted"):
+            return f"{sum(self.counts['deleted'].values())} deleted"
+        planned = self.plan.get("root_total", self.plan.get("total_rows")) if self.plan else None
+        return f"{planned} planned" if planned is not None else ""

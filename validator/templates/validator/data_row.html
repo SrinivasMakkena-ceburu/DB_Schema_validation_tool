@@ -1,0 +1,50 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}{{ table }} {{ pk }} · {{ database.name }}{% endblock %}
+{% block content %}
+<div class="heading">
+  <p class="crumbs"><a href="{% url 'data_home' %}">Data</a> / <a href="{% url 'data_tables' database.pk %}">{{ database.name }}</a> / <a href="{% url 'data_table' database.pk table %}">{{ table }}</a> /</p>
+  <h1><span class="mono">{{ table }} #{{ pk }}</span>{% if label %} <span class="muted">“{{ label }}”</span>{% endif %} {% include "validator/_env.html" with env=database.environment %}</h1>
+  {% if project_error %}<p class="errorlist">{{ project_error }}</p>{% endif %}
+</div>
+<div class="split">
+  <section class="panel">
+    <h2>Values</h2>
+    <dl class="record">
+      {% for name, value in fields %}<div><dt class="mono">{{ name }}</dt><dd class="mono">{{ value|full_value }}</dd></div>{% endfor %}
+    </dl>
+  </section>
+  <div class="stack">
+    <section class="panel">
+      <h2>Points to</h2>
+      {% for p in parents %}
+        <p class="mono small"><span class="muted">{{ p.column }} →</span> {% if p.link %}<a href="{{ p.link }}">{{ p.table }} #{{ p.value }}</a>{% else %}{{ p.table }} {{ p.value|cell }}{% endif %}</p>
+      {% empty %}<p class="muted">No foreign keys.</p>{% endfor %}
+    </section>
+    <section class="panel">
+      <h2>Referenced by</h2>
+      <p class="hint">Cascade rules: {% if project %}{{ project.name }}{% else %}database foreign keys only — <a href="{% url 'data_home' %}">pick a project</a>{% endif %}</p>
+      <table class="list compact">
+        <tbody>
+        {% for c in children %}
+          <tr><td class="mono small"><a href="{{ c.link }}">{{ c.table }}</a><br><span class="muted">.{{ c.column }}</span></td>
+            <td class="num mono">{{ c.count }}</td><td class="small"><span class="action action-{{ c.action }}">{{ c.action|action_label }}</span></td></tr>
+        {% empty %}<tr><td class="muted">Nothing references this row.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </section>
+    <section class="danger-zone">
+      <header><span class="danger-icon" aria-hidden="true">!</span> Danger zone</header>
+      <div class="danger-body">
+        <form method="post" action="{% url 'op_new' %}">
+          {% csrf_token %}
+          <input type="hidden" name="kind" value="delete"><input type="hidden" name="database" value="{{ database.pk }}"><input type="hidden" name="table" value="{{ table }}">
+          <input type="hidden" name="f_col" value="{{ pk_column }}"><input type="hidden" name="f_op" value="eq"><input type="hidden" name="f_val" value="{{ pk }}">
+          <button class="button danger-outline" type="submit">Preview delete of this row…</button>
+          <p class="hint">You will see everything that goes with it before anything is deleted.</p>
+        </form>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

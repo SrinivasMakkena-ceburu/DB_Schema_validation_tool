@@ -1,0 +1,15 @@
+{% extends "validator/base.html" %}
+{% block title %}{{ job.title|default:job.kind }}{% endblock %}
+{% block content %}
+<section class="panel narrow" data-job="{% url 'job_json' job.pk %}" data-job-status="{{ job.status }}">
+  <h1>{{ job.title|default:job.kind }}</h1>
+  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progress }}"><span style="width: {{ job.progress }}%" data-job-bar></span></div>
+  <p><span class="status status-{{ job.status }}" data-job-state>{{ job.status }}</span> <span data-job-message>{{ job.message }}</span></p>
+  {% if job.result_url and job.finished %}<p><a class="button primary" href="{{ job.result_url }}">Open the result</a></p>{% endif %}
+  {% if not job.finished %}
+    <form method="post" action="{% url 'job_cancel' job.pk %}">{% csrf_token %}<button class="button" type="submit" {% if job.cancel_requested %}disabled{% endif %}>{% if job.cancel_requested %}Cancel requested{% else %}Cancel{% endif %}</button></form>
+    <p class="hint">This page updates by itself. Deletes stop at a transaction boundary, so a cancelled cleanup keeps the batches already committed.</p>
+  {% endif %}
+  {% if job.log %}<details {% if job.status == "failed" %}open{% endif %}><summary>Log</summary><pre class="trace">{{ job.log }}</pre></details>{% endif %}
+</section>
+{% endblock %}

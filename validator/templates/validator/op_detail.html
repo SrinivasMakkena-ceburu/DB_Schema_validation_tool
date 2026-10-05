@@ -1,0 +1,149 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}{{ op.get_kind_display }} · {{ op.database_name }}{% endblock %}
+{% block content %}
+<div class="heading">
+  <p class="crumbs"><a href="{% url 'op_list' %}">Operations</a> / #{{ op.pk }}</p>
+  <h1>{{ op.get_kind_display }} <span class="mono">{{ op.root_table }}{% if op.column %}.{{ op.column }}{% endif %}</span>
+    <span class="at">on</span> <span class="mono">{{ op.database_name }}</span> {% include "validator/_env.html" with env=op.environment %}
+    <span class="status status-{{ op.status }}">{{ op.status }}</span></h1>
+  <p class="muted">{% if op.kind != "drop_column" %}Rows where <strong>{{ filter_text }}</strong>{% if op.recipe %} · cleanup recipe <a href="{% url 'recipe_edit' op.recipe.pk %}">{{ op.recipe.name }}</a>{% endif %} · {% endif %}
+    cascade rules: {% if op.project %}{{ op.project.name }}{% else %}database foreign keys only{% endif %}
+    {% if op.planned_at %}· previewed {{ op.planned_at|date:"Y-m-d H:i:s" }}{% endif %}</p>
+</div>
+
+{% if op.error %}
+  <section class="panel error-panel"><h2>{% if op.status == "failed" %}The operation failed — the transaction was rolled back{% else %}The preview could not be made{% endif %}</h2><pre class="trace">{{ op.error }}</pre></section>
+{% endif %}
+
+{% if op.executed_at %}
+<section class="panel result-panel">
+  <h2>{% if op.status == "done" %}{% if op.kind == "drop_column" %}Column dropped{% else %}Deleted{% endif %}{% elif op.status == "running" %}Running…{% elif op.status == "cancelled" %}Cancelled{% else %}Failed{% endif %}</h2>
+  <p class="muted">Confirmed with <code>{{ op.confirmation }}</code> at {{ op.executed_at|date:"Y-m-d H:i:s" }}{% if op.finished_at %}, finished {{ op.finished_at|date:"H:i:s" }}{% endif %}{% if op.job %} · <a href="{% url 'job_detail' op.job.pk %}?stay=1">job log</a>{% endif %}</p>
+  {% if op.counts.deleted %}
+    <table class="list compact"><thead><tr><th>Table</th><th class="num">Rows deleted</th></tr></thead><tbody>
+    {% for t, n in op.counts.deleted.items %}<tr><td class="mono">{{ t }}</td><td class="num mono">{{ n }}</td></tr>{% endfor %}
+    {% for c, n in op.counts.nulled.items %}<tr><td class="mono">{{ c }} <span class="muted">→ NULL</span></td><td class="num mono">{{ n }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% if op.counts.batches %}<p class="muted">{{ op.counts.batches }} batch{{ op.counts.batches|pluralize:"es" }}, {{ op.counts.roots }} rows of {{ op.root_table }}.</p>{% endif %}
+  {% elif op.counts.rows_backed_up is not None %}
+    <p>{{ op.counts.rows_backed_up }} values backed up before the drop.</p>
+  {% endif %}
+  {% if files %}
+    <h3>Backup</h3>
+    <p class="hint mono small">{{ op.backup_dir }}</p>
+    <div class="toolbar"><a class="button primary" href="{% url 'op_restore' op.pk %}">Download restore script (.sql)</a></div>
+    <details><summary>{{ files|length }} backup file{{ files|length|pluralize }}</summary>
+      <ul class="mono small">{% for f in files %}<li><a href="{% url 'op_backup_file' op.pk f.name %}">{{ f.name }}</a> <span class="muted">{{ f.size|filesizeformat }}</span></li>{% endfor %}</ul>
+    </details>
+  {% endif %}
+  {% if op.sql_log %}<details><summary>SQL that ran</summary><pre class="sql">{{ op.sql_log }}</pre></details>{% endif %}
+</section>
+{% endif %}
+
+{% if op.status == "planning" %}
+  <section class="panel"><p>Preview is running… <a href="">Refresh</a></p></section>
+{% endif %}
+
+{% if plan and op.kind == "drop_column" %}
+<section class="panel">
+  <h2>What dropping <span class="mono">{{ op.root_table }}.{{ op.column }}</span> removes</h2>
+  <dl class="facts">
+    <div><dt>Type</dt><dd class="small">{{ plan.type }}</dd></div>
+    <div><dt>Rows</dt><dd>{{ plan.rows }}</dd></div>
+    <div><dt>Values that will be lost</dt><dd>{{ plan.non_null }}</dd></div>
+  </dl>
+  {% if plan.in_model %}<div class="msg msg-error">The models of <strong>{{ op.project.name }}</strong> still use this column. The app will fail on this database after the drop.</div>{% elif plan.in_model is None %}<p class="hint">No project selected: cannot check whether the models still use this column.</p>{% endif %}
+  {% if plan.samples %}<p>Sample values: {% for s in plan.samples %}<code>{{ s }}</code> {% endfor %}</p>{% endif %}
+  {% if plan.indexes or plan.constraints %}<p>Dropped with it: {% for i in plan.indexes %}index <code>{{ i }}</code> {% endfor %}{% for c in plan.constraints %}constraint <code>{{ c }}</code> {% endfor %}</p>{% endif %}
+  {% for b in plan.blockers %}<div class="msg msg-error">Blocked: {{ b }}</div>{% endfor %}
+</section>
+{% elif plan and plan.tables is not None %}
+<section class="panel plan-panel">
+  {% if op.kind == "cleanup" %}
+    <p class="big-line"><strong>{{ plan.root_total }}</strong> rows of <span class="mono">{{ op.root_table }}</span> match, deleted in about <strong>{{ plan.batches }}</strong> batch{{ plan.batches|pluralize:"es" }} of {{ op.batch_size }}.</p>
+    <p class="hint">The first batch is shown in detail; every batch is planned, backed up and committed on its own.</p>
+  {% endif %}
+  <div class="impact">
+    <div><span class="impact-n">{{ plan.total_rows }}</span><span>rows deleted in {{ plan.tables|length }} table{{ plan.tables|length|pluralize }}{% if op.kind == "cleanup" %} (first batch){% endif %}</span></div>
+    <div><span class="impact-n">{{ plan.null_rows|default:0 }}</span><span>row{{ plan.null_rows|pluralize }} kept, with a column set to NULL</span></div>
+    <div class="{% if plan.blockers %}impact-bad{% else %}impact-good{% endif %}"><span class="impact-n">{{ plan.blockers|length }}</span><span>blocker{{ plan.blockers|length|pluralize }}</span></div>
+  </div>
+
+  <table class="list cascade">
+    <thead><tr><th>Table</th><th class="num">Rows</th><th>Reached through</th></tr></thead>
+    <tbody>
+    {% for t in plan.tables %}
+      <tr>
+        <td class="mono" style="padding-left: calc(0.65rem + {{ t.depth }} * 1.1rem)">{% if t.depth %}<span class="muted">└ </span>{% endif %}{{ t.table }}</td>
+        <td class="num mono"><strong>{{ t.count }}</strong></td>
+        <td class="small">{% for v in t.via %}<div><span class="mono">{{ v.relation }}</span> · {{ v.action|action_label }} · {{ v.count }}</div>{% empty %}<span class="muted">matches the filter</span>{% endfor %}
+          {% if t.samples %}<details><summary>{{ t.samples|length }} sample row{{ t.samples|length|pluralize }}</summary><pre class="sample">{% for s in t.samples %}{{ s|full_value }}
+{% endfor %}</pre></details>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    {% for n in plan.nulls %}
+      <tr><td class="mono">{{ n.table }}.{{ n.column }}</td><td class="num mono">{{ n.count }}</td><td class="small">set to NULL · <span class="mono">{{ n.relation }}</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if plan.blockers %}
+    <h3 class="danger-text">Blockers — nothing can be deleted until these are resolved</h3>
+    <form method="post" action="{% url 'op_repreview' op.pk %}">
+      {% csrf_token %}
+      {% for b in plan.blockers %}
+        <div class="blocker">
+          <p><strong>{{ b.count }}</strong> row{{ b.count|pluralize }} in <span class="mono">{{ b.table }}</span> via <span class="mono">{{ b.relation }}</span> — {{ b.action|action_label }}{% if b.note %} ({{ b.note }}){% endif %}</p>
+          {% if b.source == "db" %}<label class="check"><input type="checkbox" name="override" value="{{ b.relation }}"> <span>Delete these rows too (treat this database-only foreign key as cascade)</span></label>{% endif %}
+          <details><summary>sample rows</summary><pre class="sample">{% for s in b.samples %}{{ s|full_value }}
+{% endfor %}</pre></details>
+        </div>
+      {% endfor %}
+      {% if overridable %}<button class="button" type="submit">Preview again with the ticked relations</button>{% endif %}
+    </form>
+  {% endif %}
+  {% if plan.orphans %}
+    <h3>Rows left orphaned (DO_NOTHING without a database constraint)</h3>
+    {% for o in plan.orphans %}<p class="msg msg-warning"><strong>{{ o.count }}</strong> row{{ o.count|pluralize }} in <span class="mono">{{ o.table }}</span> via <span class="mono">{{ o.relation }}</span></p>{% endfor %}
+  {% endif %}
+  {% if plan.skipped %}<details><summary class="muted">{{ plan.skipped|length }} relation{{ plan.skipped|length|pluralize }} not followed</summary><ul class="small mono">{% for s in plan.skipped %}<li>{{ s }}</li>{% endfor %}</ul></details>{% endif %}
+  {% if not op.project %}<p class="msg msg-warning">No project: only database foreign keys were followed. Django foreign keys have no ON DELETE action in the database, so they show up as blockers. <a href="{% url 'data_home' %}">Pick a project</a> and preview again.</p>{% endif %}
+</section>
+{% endif %}
+
+{% if op.status == "planned" or op.status == "blocked" %}
+<section class="panel">
+  <h2>Rehearsal</h2>
+  {% if op.rehearsal.skipped %}<p class="muted">{{ op.rehearsal.skipped }}.</p>
+  {% elif op.rehearsal.ok %}<p class="ok-line">Passed: the delete ran inside a transaction that was rolled back ({{ op.rehearsal.duration_ms }} ms). Constraints and triggers accepted it.</p>
+  {% elif op.rehearsal %}<div class="msg msg-error"><strong>Failed:</strong> <pre class="note">{{ op.rehearsal.error }}</pre></div>
+  {% elif op.kind == "drop_column" %}<p class="muted">Not needed for a column drop: the backup and the drop run in one transaction.</p>{% endif %}
+  <form method="post" action="{% url 'op_repreview' op.pk %}" class="row">{% csrf_token %}{% for o in op.cascade_overrides %}<input type="hidden" name="override" value="{{ o }}">{% endfor %}<button class="button ghost" type="submit">Preview again</button></form>
+</section>
+{% endif %}
+
+{% if op.status == "planned" %}
+<section class="danger-zone confirm-zone {% if op.environment == 'prod' %}is-prod{% endif %}">
+  <header><span class="danger-icon" aria-hidden="true">!</span> {% if op.environment == "prod" %}PRODUCTION · {% endif %}This permanently changes {{ op.database_name }}</header>
+  <div class="danger-body">
+    {% if not can_write %}
+      <p><strong>Writes are not enabled for this database.</strong> This is a preview only. Enable writes on the <a href="{% url 'database_list' %}">database settings</a> to run it.</p>
+    {% else %}
+      <ul class="safety">
+        <li>Every affected row is backed up to <span class="mono">data/backups/op-{{ op.pk }}/</span> first, with a restore script.</li>
+        <li>It runs in {% if op.kind == "cleanup" %}one transaction per batch{% else %}one transaction{% endif %}; if the row counts differ from this preview, nothing is changed.</li>
+        <li>The preview expires {{ plan_max_age }} minutes after it was made.</li>
+      </ul>
+      <form method="post" action="{% url 'op_execute' op.pk %}" class="stack" data-confirm-form>
+        {% csrf_token %}
+        <label for="confirmation">Type <code class="phrase" data-phrase>{{ phrase }}</code> to confirm</label>
+        <input type="text" id="confirmation" name="confirmation" autocomplete="off" spellcheck="false" class="mono" data-confirm-input>
+        {% if op.environment == "prod" %}<label class="check"><input type="checkbox" name="backup_ack" data-confirm-ack> <span>I have checked that the backup folder has space and I know how to restore from it.</span></label>{% endif %}
+        <button type="submit" class="button danger-solid" data-confirm-button disabled>{% if op.kind == "drop_column" %}Drop column {{ op.column }}{% elif op.kind == "cleanup" %}Run cleanup of {{ plan.root_total }} rows{% else %}Delete {{ plan.total_rows }} rows{% endif %}</button>
+      </form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

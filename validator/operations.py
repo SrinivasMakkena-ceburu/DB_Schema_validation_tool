@@ -55,6 +55,7 @@ def preview_operation(op):
                     result["batches"] = math.ceil(result["root_total"] / op.batch_size) if op.batch_size else 1
                 conn.rollback()
             result["signature"] = plan_signature(result)
+            result["null_rows"] = sum(n["count"] for n in result["nulls"])
             result["pk"] = graph.tables[op.root_table]["pk"]
             op.plan = result
             if result["blockers"]:

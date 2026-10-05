@@ -1,0 +1,81 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}{{ table }} · {{ database.name }}{% endblock %}
+{% block content %}
+<div class="heading">
+  <p class="crumbs"><a href="{% url 'data_home' %}">Data</a> / <a href="{% url 'data_tables' database.pk %}">{{ database.name }}</a> /</p>
+  <h1><span class="mono">{{ table }}</span> {% include "validator/_env.html" with env=database.environment %}</h1>
+  <p class="muted">{% if total is not None %}{% if total > count_cap %}more than {{ count_cap }}{% else %}{{ total }}{% endif %} row{{ total|pluralize }} match{% if total == 1 %}es{% endif %} <strong>{{ filter_text }}</strong>{% endif %}
+    · primary key <span class="mono">{{ info.pk|join:", "|default:"none" }}</span></p>
+</div>
+
+<form method="get" class="panel filter-panel">
+  <h2>Filter</h2>
+  {% include "validator/_filter_editor.html" %}
+  {% if filter_error %}<p class="errorlist">{{ filter_error }}</p>{% endif %}
+  <div class="row">
+    <button class="button primary" type="submit">Apply filter</button>
+    <a class="button ghost" href="{% url 'data_table' database.pk table %}">Clear</a>
+    {% if masked %}<label class="check small"><input type="checkbox" name="reveal" value="1" {% if reveal %}checked{% endif %}> show {{ masked|length }} secret-looking column{{ masked|length|pluralize }}</label>{% endif %}
+  </div>
+</form>
+
+<div class="grid-wrap">
+<table class="grid">
+  <thead><tr>
+    {% for name, type in columns.items %}
+      <th scope="col"><a href="?{{ query }}{% if query %}&amp;{% endif %}sort={% if sort_column == name and not descending %}-{% endif %}{{ name }}" title="{{ type }}">{{ name }}{% if sort_column == name %} {% if descending %}↓{% else %}↑{% endif %}{% endif %}</a></th>
+    {% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      {% for value in row.cells %}
+        <td>{% if forloop.first and row.pk is not None %}<a href="{% url 'data_row' database.pk table row.pk %}">{{ value|cell }}</a>{% else %}{{ value|cell }}{% endif %}</td>
+      {% endfor %}
+    </tr>
+  {% empty %}
+    <tr><td colspan="{{ columns|length }}" class="muted">No rows match.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="row pager">
+  {% if page > 1 %}<a class="button ghost" href="?{{ query }}{% if query %}&amp;{% endif %}page={{ page|add:-1 }}{% if sort_column %}&amp;sort={% if descending %}-{% endif %}{{ sort_column }}{% endif %}">← Previous</a>{% endif %}
+  <span class="muted">Page {{ page }}</span>
+  {% if has_next %}<a class="button ghost" href="?{{ query }}{% if query %}&amp;{% endif %}page={{ page|add:1 }}{% if sort_column %}&amp;sort={% if descending %}-{% endif %}{{ sort_column }}{% endif %}">Next →</a>{% endif %}
+</div>
+
+<section class="danger-zone">
+  <header><span class="danger-icon" aria-hidden="true">!</span> Danger zone · {{ database.name }} {% include "validator/_env.html" with env=database.environment %}</header>
+  <div class="danger-body">
+    {% if not database.writes_enabled %}<p class="hint">Writes are disabled for this database: you can preview what would be deleted, but not run it.</p>{% endif %}
+    <div class="danger-actions">
+      <form method="post" action="{% url 'op_new' %}">
+        {% csrf_token %}
+        <input type="hidden" name="kind" value="delete"><input type="hidden" name="database" value="{{ database.pk }}"><input type="hidden" name="table" value="{{ table }}">
+        {% for f in filters %}<input type="hidden" name="f_col" value="{{ f.column }}"><input type="hidden" name="f_op" value="{{ f.op }}"><input type="hidden" name="f_val" value="{{ f.value }}">{% endfor %}
+        <button class="button danger-outline" type="submit" {% if not filters or filter_error %}disabled{% endif %}>Preview delete of matching rows…</button>
+        {% if not filters %}<p class="hint">Apply a filter first: deletes always need one.</p>{% else %}<p class="hint">Shows every row that would be deleted or nulled through cascades. Nothing is deleted yet.</p>{% endif %}
+      </form>
+      {% if filters %}
+      <a class="button ghost" href="{% url 'recipe_create' %}?root_table={{ table }}{% for f in filters %}&amp;f_col={{ f.column|urlencode }}&amp;f_op={{ f.op }}&amp;f_val={{ f.value|urlencode }}{% endfor %}">Save as cleanup recipe…</a>
+      {% endif %}
+    </div>
+    <details class="columns-panel">
+      <summary>Drop a column…</summary>
+      <table class="list compact">
+        <thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th></th></tr></thead>
+        <tbody>
+        {% for name, c in info.columns.items %}
+          <tr><td class="mono">{{ name }}</td><td class="mono small">{{ c.type }}</td><td>{{ c.nullable|yesno:"yes,no" }}</td>
+            <td class="actions">{% if name not in info.pk %}<form method="post" action="{% url 'op_new' %}">{% csrf_token %}
+              <input type="hidden" name="kind" value="drop_column"><input type="hidden" name="database" value="{{ database.pk }}"><input type="hidden" name="table" value="{{ table }}"><input type="hidden" name="column" value="{{ name }}">
+              <button class="button ghost danger" type="submit">Preview drop…</button></form>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </div>
+</section>
+{% endblock %}

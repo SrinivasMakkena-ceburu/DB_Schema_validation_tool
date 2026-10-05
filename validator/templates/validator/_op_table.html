@@ -1,0 +1,14 @@
+<table class="list">
+  <thead><tr><th>When</th><th>Operation</th><th>Database</th><th>Status</th><th class="num">Rows</th></tr></thead>
+  <tbody>
+  {% for op in operations %}
+    <tr>
+      <td><a href="{% url 'op_detail' op.pk %}">{{ op.created_at|date:"Y-m-d H:i" }}</a></td>
+      <td><strong>{{ op.get_kind_display }}</strong> <span class="mono">{{ op.root_table }}{% if op.column %}.{{ op.column }}{% endif %}</span>{% if op.recipe %} <span class="muted">({{ op.recipe.name }})</span>{% endif %}</td>
+      <td class="mono">{{ op.database_name }} {% include "validator/_env.html" with env=op.environment %}</td>
+      <td><span class="status status-{{ op.status }}">{{ op.status }}</span></td>
+      <td class="num mono">{{ op.rows_summary }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
