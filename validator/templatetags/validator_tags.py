@@ -1,5 +1,7 @@
 from django import template
 
+from ..schema_diff import finding_object as _finding_object
+
 register = template.Library()
 
 # category: (label, diff marker). "+" the branch needs it in the database,
@@ -48,11 +50,7 @@ def get(mapping, key):
 
 @register.filter
 def finding_object(f):
-    if f["table"]:
-        return f"{f['table']}.{f['column']}" if f["column"] else f["table"]
-    if f["column"]:
-        return f"{f['app']}.{f['column']}"
-    return f["app"]
+    return _finding_object(f)
 
 
 MARKER_CLASSES = {"+": "need", "−": "extra", "~": "diff", "!": "broken", "?": "nomig"}

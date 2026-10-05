@@ -30,3 +30,10 @@ def pg_conninfo():
     pg_execute(PG_ADMIN, f'CREATE DATABASE "{name}"')
     yield {**PG_ADMIN, "dbname": name}
     pg_execute(PG_ADMIN, f'DROP DATABASE "{name}" WITH (FORCE)')
+
+
+@pytest.fixture(autouse=True)
+def _inline_jobs(settings, tmp_path):
+    """Background jobs run inline in tests; backups go to a temp folder."""
+    settings.JOBS_INLINE = True
+    settings.BACKUP_DIR = tmp_path / "backups"

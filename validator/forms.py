@@ -32,10 +32,18 @@ class DatabaseForm(forms.ModelForm):
         help_text="Stored encrypted. Leave blank to keep the saved password, or to use ~/.pgpass.",
     )
     clear_password = forms.BooleanField(required=False, label="Remove saved password")
+    write_password = forms.CharField(
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
+        help_text="Password of the write user. Leave blank to keep the saved one.",
+    )
+    clear_write_password = forms.BooleanField(required=False, label="Remove saved write password")
 
     class Meta:
         model = DatabaseTarget
-        fields = ["name", "host", "port", "dbname", "user", "password", "clear_password", "sslmode", "schema", "notes"]
+        fields = ["name", "environment", "host", "port", "dbname", "user", "password", "clear_password",
+                  "sslmode", "schema", "notes", "writes_enabled", "write_user", "write_password",
+                  "clear_write_password", "operation_timeout_s"]
         widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
 
     def save(self, commit=True):
@@ -44,6 +52,10 @@ class DatabaseForm(forms.ModelForm):
             database.set_password(self.cleaned_data["password"])
         elif self.cleaned_data.get("clear_password"):
             database.set_password("")
+        if self.cleaned_data.get("write_password"):
+            database.set_write_password(self.cleaned_data["write_password"])
+        elif self.cleaned_data.get("clear_write_password"):
+            database.set_write_password("")
         if commit:
             database.save()
         return database

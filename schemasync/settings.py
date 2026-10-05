@@ -71,3 +71,10 @@ STATIC_URL = "static/"
 
 # How long the extractor may take to import the target project.
 EXTRACTOR_TIMEOUT_SECONDS = 180
+
+# Background jobs run on a thread; SCHEMASYNC_JOBS_INLINE=1 runs them in the request.
+JOBS_INLINE = os.environ.get("SCHEMASYNC_JOBS_INLINE", "0") == "1"
+# Row backups taken before every delete / cleanup / column drop.
+BACKUP_DIR = DATA_DIR / "backups"
+# A previewed operation older than this must be previewed again before it can run.
+PLAN_MAX_AGE_MINUTES = 15

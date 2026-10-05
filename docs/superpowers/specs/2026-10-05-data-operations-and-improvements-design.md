@@ -13,7 +13,9 @@ read-only data browser and four comparison improvements.
 | Area | Feature |
 |---|---|
 | Data operations (write) | **Delete a record** (customer, device, user, …) with everything that cascades from it |
+| | **Delete matching rows** — any filter on a table (from the data browser), with cascade, single transaction |
 | | **Cleanup** rows matching a filter (e.g. execution history older than 90 days), with cascade, in batches; saved as reusable recipes |
+| | **Drop a column** (typically one the comparison reports as "not in model"), with preview, backup and restore script |
 | Read | **Data browser**: tables, rows, filters, related records |
 | Comparison | **DB vs DB** compare (e.g. stage vs prod-us) |
 | | **Background runs** with progress, **re-run**, **changes since the previous run** |
@@ -94,8 +96,14 @@ rows). Each batch is planned, backed up and executed in its own transaction,
 re-checking counts per batch; progress is shown live and the job can be
 cancelled between batches. A record delete is always a single transaction.
 
-**Never:** raw SQL from the UI, `TRUNCATE`, schema changes, or executing the
-comparison fix scripts. Filters are structured (column, operator, value) and
+**Drop column** follows the same stages: plan shows non-NULL count, sample
+values, dependent indexes/constraints (dropped with the column) and dependent
+views (a **blocker** — no `CASCADE`); a warning when the selected branch's
+models still use the column. Backup = primary key + column value; restore =
+`ADD COLUMN` + `UPDATE`s. Confirmation phrase: `drop <table>.<column> on <db>`.
+
+**Never:** raw SQL from the UI, `TRUNCATE`, `DROP TABLE`, other schema
+changes, or executing the comparison fix scripts. Filters are structured (column, operator, value) and
 always parameterised.
 
 ## 4. Data operations UI

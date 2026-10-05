@@ -20,6 +20,15 @@ def finding(category, severity, app, table, message, column="", data=None):
     }
 
 
+def finding_object(f):
+    """Human-readable object a finding is about: table.column, app.migration or app."""
+    if f["table"]:
+        return f"{f['table']}.{f['column']}" if f["column"] else f["table"]
+    if f["column"]:
+        return f"{f['app']}.{f['column']}"
+    return f["app"]
+
+
 def guess_app(table, app_labels):
     matches = [label for label in app_labels if table.startswith(label + "_")]
     return max(matches, key=len) if matches else ""

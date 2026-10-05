@@ -89,7 +89,8 @@ def test_database_password_never_rendered_and_kept_when_blank(client, database):
     body = client.get(reverse("database_edit", args=[database.pk])).content.decode()
     assert "topsecret" not in body and database.password_encrypted not in body
     data = {"name": "stage", "host": "db.local", "port": 5432, "dbname": "x", "user": "u",
-            "sslmode": "prefer", "schema": "public", "notes": "", "password": ""}
+            "sslmode": "prefer", "schema": "public", "notes": "", "password": "",
+            "environment": "dev", "operation_timeout_s": 300}
     assert client.post(reverse("database_edit", args=[database.pk]), data).status_code == 302
     database.refresh_from_db()
     assert database.host == "db.local" and database.get_password() == "topsecret"
