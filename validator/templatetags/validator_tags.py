@@ -29,6 +29,8 @@ CATEGORIES = {
     "inconsistent": ("Inconsistent history", "!"),
     "multiple_leaves": ("Needs a merge migration", "!"),
     "pending_change": ("Model change without migration", "?"),
+    "history_only_reference": ("Applied on reference only", "+"),
+    "history_only_target": ("Applied here, not on reference", "−"),
 }
 CATEGORY_ORDER = list(CATEGORIES)
 

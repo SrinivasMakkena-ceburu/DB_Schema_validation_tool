@@ -5,6 +5,10 @@ from . import views, views_data
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("batches/<uuid:batch_id>/", views.batch_detail, name="batch_detail"),
+    path("batches/<uuid:batch_id>/rerun/", views.batch_rerun, name="batch_rerun"),
+    path("ignore/", views.ignore_list, name="ignore_list"),
+    path("ignore/new/", views.ignore_create, name="ignore_create"),
+    path("ignore/<int:pk>/delete/", views.ignore_delete, name="ignore_delete"),
     path("runs/", views.run_list, name="run_list"),
     path("runs/<int:pk>/", views.run_detail, name="run_detail"),
     path("runs/<int:pk>/fix.sql", views.run_fix_sql, name="run_fix_sql"),

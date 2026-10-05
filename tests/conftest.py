@@ -123,3 +123,12 @@ def sample_extracted(tmp_path_factory):
     )
     assert proc.returncode == 0, proc.stderr
     return json.loads(out.read_text())
+
+
+@pytest.fixture
+def sample_db2(_sample_template):
+    """A second, independent copy of the sample database."""
+    name = f"schemasync_test_{uuid.uuid4().hex[:10]}"
+    pg_execute(PG_ADMIN, f'CREATE DATABASE "{name}" TEMPLATE "{_sample_template}"')
+    yield {**PG_ADMIN, "dbname": name}
+    pg_execute(PG_ADMIN, f'DROP DATABASE "{name}" WITH (FORCE)')

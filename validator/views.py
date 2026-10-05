@@ -1,16 +1,18 @@
 import json
 
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from .crypto import DecryptError
 from .db_inspector import InspectError, check_connection
-from .forms import ComparisonForm, DatabaseForm, ProjectForm
-from .models import ComparisonRun, DatabaseTarget, Project
+from .forms import ComparisonForm, DatabaseForm, IgnoreRuleForm, ProjectForm
+from .jobs import recover_interrupted, start_job
+from .models import ComparisonRun, DatabaseTarget, IgnoreRule, Project
 from .project_loader import ExtractorError, git_info, load_project
-from .runner import run_batch
+from .runner import changes_since, finding_key, previous_run, run_batch
 from .templatetags.validator_tags import CATEGORY_ORDER
 
 
@@ -22,11 +24,27 @@ def _batches(runs):
     return [{"id": batch_id, "runs": items, "first": items[0]} for batch_id, items in batches.items()]
 
 
+def _start_comparison(project, databases, options, kind, reference, force_refresh=False):
+    title = (f"Compare {project.name} with " if kind == "branch" else f"Compare {reference.name} with ")
+    title += ", ".join(d.name for d in databases)
+
+    def target(job):
+        batch_id = run_batch(project, databases, options, kind=kind, reference=reference, job=job,
+                             force_refresh=force_refresh)
+        return reverse("batch_detail", args=[batch_id])
+
+    job = start_job("compare", title, target)
+    return redirect(job.result_url if job.status == "done" else reverse("job_detail", args=[job.pk]))
+
+
 def dashboard(request):
+    recover_interrupted()
     form = ComparisonForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        batch_id = run_batch(form.cleaned_data["project"], list(form.cleaned_data["databases"]), form.options())
-        return redirect("batch_detail", batch_id=batch_id)
+        data = form.cleaned_data
+        return _start_comparison(data["project"] if data["mode"] == "branch" else None, list(data["databases"]),
+                                 form.options(), data["mode"], data["reference"] if data["mode"] == "db" else None,
+                                 data["refresh_models"])
     recent = ComparisonRun.objects.all()[:60]
     return render(request, "validator/dashboard.html", {
         "form": form,
@@ -47,14 +65,41 @@ def batch_detail(request, batch_id):
         {"category": cat, "cells": [run.summary.get("by_category", {}).get(cat) for run in runs]}
         for cat in CATEGORY_ORDER if cat in present
     ]
-    return render(request, "validator/batch.html", {"runs": runs, "rows": rows, "first": runs[0]})
+    new_counts = []
+    for run in runs:
+        previous = previous_run(run) if run.status == ComparisonRun.STATUS_OK else None
+        new_counts.append(len(changes_since(run, previous)["new"]) if previous else None)
+    return render(request, "validator/batch.html", {"runs": runs, "rows": rows, "first": runs[0],
+                                                    "new_counts": new_counts})
+
+
+@require_POST
+def batch_rerun(request, batch_id):
+    runs = list(ComparisonRun.objects.filter(batch_id=batch_id).order_by("database_name"))
+    if not runs:
+        raise Http404("No such comparison")
+    first = runs[0]
+    databases = [r.database for r in runs if r.database]
+    reference = DatabaseTarget.objects.filter(pk=first.options.get("reference_id")).first()
+    if not databases or (first.kind == "branch" and not first.project) or (first.kind == "db" and not reference):
+        messages.error(request, "The project or databases of this comparison were deleted; start a new one.")
+        return redirect("batch_detail", batch_id=batch_id)
+    options = {k: v for k, v in first.options.items() if k not in ("kind", "reference_id")}
+    return _start_comparison(first.project, databases, options, first.kind, reference)
 
 
 def run_detail(request, pk):
     run = get_object_or_404(ComparisonRun, pk=pk)
+    previous = previous_run(run) if run.status == ComparisonRun.STATUS_OK else None
+    changes = changes_since(run, previous) if previous else {"new": set(), "resolved": []}
+    for section in ("schema", "migrations", "pending"):
+        for f in run.report.get(section, []):
+            f["is_new"] = bool(previous) and finding_key(f) in changes["new"]
     return render(request, "validator/run_detail.html", {
         "run": run,
         "report": run.report,
+        "previous": previous,
+        "changes": changes,
         "siblings": ComparisonRun.objects.filter(batch_id=run.batch_id).exclude(pk=run.pk).order_by("database_name"),
     })
 
@@ -171,3 +216,32 @@ def delete_object(request, kind, pk):
         messages.success(request, f"Deleted {kind} {name}. Its past runs are kept.")
         return redirect(target)
     return render(request, "validator/confirm_delete.html", {"object": obj, "kind": kind, "cancel": target})
+
+
+# Ignore rules -----------------------------------------------------------------
+
+def ignore_list(request):
+    return render(request, "validator/ignore_list.html", {"rules": IgnoreRule.objects.select_related("database", "project")})
+
+
+def ignore_create(request):
+    initial = {k: request.GET.get(k) for k in ("database", "project", "category", "pattern", "note") if request.GET.get(k)}
+    form = IgnoreRuleForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        rule = form.save()
+        messages.success(request, f"Findings matching {rule.pattern} will be ignored from the next run on. "
+                                  "Re-run a comparison to apply it.")
+        target = request.POST.get("next", "")
+        return redirect(target if target.startswith("/") and not target.startswith("//") else "ignore_list")
+    return render(request, "validator/form.html", {
+        "form": form, "object": None, "kind": "ignore rule", "cancel": "ignore_list",
+        "next": request.GET.get("next", ""),
+    })
+
+
+@require_POST
+def ignore_delete(request, pk):
+    rule = get_object_or_404(IgnoreRule, pk=pk)
+    rule.delete()
+    messages.success(request, f"Deleted ignore rule {rule.pattern}.")
+    return redirect("ignore_list")

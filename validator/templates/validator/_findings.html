@@ -1,7 +1,7 @@
 {% load validator_tags %}
 {% if findings %}
 <table class="findings" data-filterable>
-  <thead><tr><th class="gutter" aria-label="Kind"></th><th>Severity</th><th>App</th><th>Object</th><th>Finding</th></tr></thead>
+  <thead><tr><th class="gutter" aria-label="Kind"></th><th>Severity</th><th>App</th><th>Object</th><th>Finding</th><th class="sr-col"><span class="sr-only">Actions</span></th></tr></thead>
   <tbody>
   {% for f in findings %}
     <tr data-severity="{{ f.severity }}" data-text="{{ f.app }} {{ f|finding_object }} {{ f.message }} {{ f.category }}">
@@ -9,7 +9,8 @@
       <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
       <td class="mono">{{ f.app }}</td>
       <td class="mono">{{ f|finding_object }}</td>
-      <td>{{ f.message }}{% if f.data.names %}<details><summary>{{ f.data.names|length }} row{{ f.data.names|length|pluralize }}</summary><span class="mono small">{{ f.data.names|join:", " }}</span></details>{% endif %}</td>
+      <td>{% if f.is_new %}<span class="new-badge">new</span> {% endif %}{{ f.message }}{% if f.data.names %}<details><summary>{{ f.data.names|length }} row{{ f.data.names|length|pluralize }}</summary><span class="mono small">{{ f.data.names|join:", " }}</span></details>{% endif %}</td>
+      <td class="row-action">{% if run %}<a class="small" href="{% url 'ignore_create' %}?database={{ run.database_id|default:'' }}&amp;category={{ f.category }}&amp;pattern={{ f|finding_object|urlencode }}&amp;next={{ request.path|urlencode }}" title="Accept this as known drift">Ignore…</a>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

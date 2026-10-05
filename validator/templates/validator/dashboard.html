@@ -3,40 +3,51 @@
 {% block content %}
 <div class="split">
   <section class="panel">
-    <h1>Compare a branch with environments</h1>
-    <p class="lede">Reads the models and migration files in the project folder (whatever branch is checked out) and compares them with each database you pick.</p>
-    {% if not has_projects or not has_databases %}
+    <h1>Compare</h1>
+    <p class="lede">Compare the branch checked out in a project folder with your environments — or one environment directly with others.</p>
+    {% if not has_databases %}
       <div class="empty">
         {% if not has_projects %}<p><a class="button" href="{% url 'project_create' %}">Add a project</a> — the folder of your Django checkout and its venv Python.</p>{% endif %}
-        {% if not has_databases %}<p><a class="button" href="{% url 'database_create' %}">Add a database</a> — stage, prod-eu, prod-us…</p>{% endif %}
+        <p><a class="button" href="{% url 'database_create' %}">Add a database</a> — stage, prod-eu, prod-us…</p>
       </div>
     {% else %}
     <form method="post" class="stack" data-busy-form>
       {% csrf_token %}
       {{ form.non_field_errors }}
-      <div class="field">
-        <label for="{{ form.project.id_for_label }}">Project</label>
-        {{ form.project }}
+      <fieldset class="field">
+        <legend>Compare</legend>
+        <div class="checks" data-mode-switch>{% for choice in form.mode %}<label class="check">{{ choice.tag }} <span>{{ choice.choice_label }}</span></label>{% endfor %}</div>
+      </fieldset>
+      <div class="field" data-mode="branch">
+        <label for="{{ form.project.id_for_label }}">Project (its checked-out branch)</label>
+        {% if has_projects %}{{ form.project }}{% else %}<p class="hint"><a href="{% url 'project_create' %}">Add a project</a> first: the folder of your Django checkout and its venv Python.</p>{% endif %}
         {{ form.project.errors }}
+        <label class="check small">{{ form.refresh_models }} <span>{{ form.refresh_models.label }}</span></label>
+      </div>
+      <div class="field" data-mode="db">
+        <label for="{{ form.reference.id_for_label }}">Reference database</label>
+        {{ form.reference }}
+        {{ form.reference.errors }}
+        <p class="hint">Its tables and migration history are what the other databases are compared with. No fix SQL is generated in this mode.</p>
       </div>
       <fieldset class="field">
         <legend>Databases</legend>
         <div class="checks">{% for choice in form.databases %}<label class="check">{{ choice.tag }} <span>{{ choice.choice_label }}</span></label>{% endfor %}</div>
         {{ form.databases.errors }}
       </fieldset>
-      <fieldset class="field">
+      <fieldset class="field" data-mode="branch">
         <legend>Migration history in the fix script</legend>
         {% for choice in form.history_strategy %}<label class="check">{{ choice.tag }} <span>{{ choice.choice_label }}</span></label>{% endfor %}
         <label class="check">{{ form.include_other_apps }} <span>{{ form.include_other_apps.label }}</span></label>
       </fieldset>
       <button type="submit" class="button primary">Run comparison</button>
-      <p class="hint busy-hint" hidden>Importing the project and inspecting databases…</p>
+      <p class="hint busy-hint" hidden>Starting… you'll see progress on the next page.</p>
     </form>
     {% endif %}
   </section>
 
   <section class="panel">
-    <h2>Recent comparisons</h2>
+    <h2>Recent comparisons <a class="small" href="{% url 'ignore_list' %}">ignore rules</a></h2>
     {% if batches %}
       <ul class="batch-list">
       {% for batch in batches %}

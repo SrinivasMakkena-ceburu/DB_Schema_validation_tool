@@ -2,9 +2,16 @@
 {% load validator_tags %}
 {% block title %}{{ first.project_name }} vs {{ runs|length }} database{{ runs|length|pluralize }}{% endblock %}
 {% block content %}
-<div class="heading">
-  <h1><span class="mono">{{ first.project_name }}</span> <span class="at">@</span> <span class="mono">{{ first.git_branch }}</span> <span class="muted mono">{{ first.git_commit }}</span></h1>
-  <p class="muted">{{ first.started_at|date:"Y-m-d H:i" }} · history strategy: {{ first.options.history_strategy }}</p>
+<div class="heading row">
+  <div>
+  {% if first.kind == "db" %}
+    <h1><span class="mono">{{ first.reference_name }}</span> <span class="muted">(reference database)</span></h1>
+  {% else %}
+    <h1><span class="mono">{{ first.project_name }}</span> <span class="at">@</span> <span class="mono">{{ first.git_branch }}</span> <span class="muted mono">{{ first.git_commit }}</span></h1>
+  {% endif %}
+  <p class="muted">{{ first.started_at|date:"Y-m-d H:i" }}{% if first.kind == "branch" %} · history strategy: {{ first.options.history_strategy }}{% endif %}</p>
+  </div>
+  <form method="post" action="{% url 'batch_rerun' first.batch_id %}" data-busy-form>{% csrf_token %}<button class="button" type="submit">Re-run</button></form>
 </div>
 
 <div class="matrix-wrap">
@@ -21,6 +28,10 @@
       {% for run in runs %}
         <td>{% if run.status == 'error' %}<span class="failed">run failed</span>{% else %}{% include "validator/_summary_pills.html" with summary=run.summary %}{% endif %}</td>
       {% endfor %}
+    </tr>
+    <tr class="totals">
+      <th scope="row">New since previous run</th>
+      {% for n in new_counts %}<td>{% if n is None %}<span class="dash">—</span>{% elif n %}<span class="pill sev-error">{{ n }} new</span>{% else %}<span class="muted small">none</span>{% endif %}</td>{% endfor %}
     </tr>
   </thead>
   <tbody>

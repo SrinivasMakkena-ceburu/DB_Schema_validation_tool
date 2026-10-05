@@ -325,3 +325,11 @@ pre.sample { font: 0.78rem/1.45 var(--mono); background: var(--code-bg); padding
   .impact { grid-template-columns: 1fr; }
   .record > div { grid-template-columns: 1fr; gap: 0.1rem; }
 }
+.new-badge { font: 700 0.65rem var(--mono); text-transform: uppercase; color: #fff; background: var(--accent); padding: 0.05rem 0.35rem; border-radius: 3px; vertical-align: middle; }
+.changes-line { margin: 0 0 1rem; padding: 0.6rem 0.9rem; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 var(--radius) var(--radius) 0; }
+.changes-line details { margin-top: 0.35rem; }
+.row-action { white-space: nowrap; text-align: right; }
+.row-action a { color: var(--muted); }
+.row-action a:hover { color: var(--accent-ink); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.heading.row > div { margin-right: auto; }

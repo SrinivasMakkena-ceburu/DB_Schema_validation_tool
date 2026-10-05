@@ -5,7 +5,11 @@
 <div class="heading">
   <p class="crumbs"><a href="{% url 'batch_detail' run.batch_id %}">← all databases in this comparison</a>
     {% for s in siblings %}· <a href="{% url 'run_detail' s.pk %}">{{ s.database_name }}</a> {% endfor %}</p>
+  {% if run.kind == "db" %}
+  <h1><span class="mono">{{ run.reference_name }}</span> <span class="muted">(reference)</span> <span class="arrow">→</span> <span class="mono">{{ run.database_name }}</span></h1>
+  {% else %}
   <h1><span class="mono">{{ run.project_name }}</span> <span class="at">@</span> <span class="mono">{{ run.git_branch }}</span> <span class="arrow">→</span> <span class="mono">{{ run.database_name }}</span></h1>
+  {% endif %}
   <p class="muted">commit <span class="mono">{{ run.git_commit }}</span> · {{ run.started_at|date:"Y-m-d H:i" }} · {{ run.duration_ms }} ms
     {% if report.meta %}· Django {{ report.meta.django_version }} · {{ report.meta.models }} models · {{ report.meta.db_tables }} tables · {{ report.meta.history_rows }} history rows{% endif %}</p>
 </div>
@@ -16,13 +20,20 @@
     <pre class="trace">{{ run.error }}</pre>
   </section>
 {% else %}
+  {% if previous %}
+    <div class="changes-line">
+      Since the previous run ({{ previous.started_at|date:"M j, H:i" }}): <strong>{{ changes.new|length }} new</strong>, <strong>{{ changes.resolved|length }} resolved</strong>.
+      {% if changes.resolved %}<details><summary>Resolved findings</summary><ul class="small">{% for f in changes.resolved %}<li><span class="mono">{{ f.category }}</span> {{ f.message }}</li>{% endfor %}</ul></details>{% endif %}
+    </div>
+  {% endif %}
   {% for note in report.notes %}<div class="msg msg-warning"><pre class="note">{{ note }}</pre></div>{% endfor %}
 
   <div class="tabs" role="tablist">
     <a role="tab" href="#schema" class="tab">Schema {% include "validator/_summary_pills.html" with summary=run.summary.sections.schema %}</a>
     <a role="tab" href="#migrations" class="tab">Migrations {% include "validator/_summary_pills.html" with summary=run.summary.sections.migrations %}</a>
     <a role="tab" href="#pending" class="tab">Without migration <span class="pills"><span class="pill sev-warning">{{ report.pending|length }}</span></span></a>
-    <a role="tab" href="#fix" class="tab">Fix SQL</a>
+    {% if run.kind != "db" %}<a role="tab" href="#fix" class="tab">Fix SQL</a>{% endif %}
+    {% if report.ignored %}<a role="tab" href="#ignored" class="tab">Ignored <span class="pills"><span class="pill is-zero">{{ report.ignored|length }}</span></span></a>{% endif %}
   </div>
 
   <div class="filters" data-filters>
@@ -33,7 +44,7 @@
   </div>
 
   <section id="schema" class="tabpanel" role="tabpanel">
-    {% include "validator/_findings.html" with findings=report.schema empty="Every table, column and constraint the models need is in the database." %}
+    {% include "validator/_findings.html" with findings=report.schema empty="No schema differences." %}
   </section>
 
   <section id="migrations" class="tabpanel" role="tabpanel">
@@ -55,11 +66,19 @@
     {% include "validator/_findings.html" with findings=report.migrations empty="django_migrations matches the migration files in this branch." %}
   </section>
 
+  <section id="ignored" class="tabpanel" role="tabpanel">
+    <p class="muted">Findings matching an <a href="{% url 'ignore_list' %}">ignore rule</a>: not counted and left out of the fix script.</p>
+    <table class="findings"><thead><tr><th>Object</th><th>Finding</th><th>Rule</th></tr></thead><tbody>
+    {% for f in report.ignored %}<tr><td class="mono">{{ f|finding_object }}</td><td>{{ f.message }}</td><td class="mono small">{{ f.rule }}{% if f.rule_note %} <span class="muted">— {{ f.rule_note }}</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+
   <section id="pending" class="tabpanel" role="tabpanel">
     <p class="muted">Model changes in this branch that no migration file covers — what <code>makemigrations --check</code> would report. Create these migrations before deploying.</p>
     {% include "validator/_findings.html" with findings=report.pending empty="Every model change in this branch has a migration file." %}
   </section>
 
+  {% if run.kind != "db" %}
   <section id="fix" class="tabpanel" role="tabpanel">
     <div class="toolbar">
       <a class="button" href="{% url 'run_fix_sql' run.pk %}">Download .sql</a>
@@ -74,6 +93,7 @@
 {% endfor %}</pre>
     {% endif %}
   </section>
+  {% endif %}
   {% include "validator/_legend.html" %}
 {% endif %}
 {% endblock %}

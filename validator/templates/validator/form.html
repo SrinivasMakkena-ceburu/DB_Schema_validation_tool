@@ -5,6 +5,7 @@
   <h1>{% if object %}Edit {{ kind }} {{ object.name }}{% else %}Add {{ kind }}{% endif %}</h1>
   <form method="post" class="stack">
     {% csrf_token %}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     {{ form.non_field_errors }}
     {% for field in form %}
       <div class="field{% if field.errors %} has-error{% endif %}">

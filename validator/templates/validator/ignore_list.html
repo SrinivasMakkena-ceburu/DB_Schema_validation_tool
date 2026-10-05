@@ -1,0 +1,21 @@
+{% extends "validator/base.html" %}
+{% load validator_tags %}
+{% block title %}Ignore rules{% endblock %}
+{% block content %}
+<div class="heading row"><h1>Ignore rules</h1><a class="button primary" href="{% url 'ignore_create' %}">Add rule</a></div>
+<p class="lede">Known, accepted drift — a legacy table, another feature's app on one environment. Matching findings are not counted and stay out of fix scripts. Rules apply from the next run.</p>
+{% if rules %}
+<table class="list">
+  <thead><tr><th>Pattern</th><th>Kind</th><th>Database</th><th>Project</th><th>Note</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rules %}
+    <tr><td class="mono">{{ r.pattern }}</td><td>{% if r.category %}{{ r.category|category_label }}{% else %}<span class="muted">any</span>{% endif %}</td>
+      <td class="mono">{{ r.database.name|default:"all" }}</td><td>{{ r.project.name|default:"all" }}</td><td class="small">{{ r.note }}</td>
+      <td class="actions"><form method="post" action="{% url 'ignore_delete' r.pk %}">{% csrf_token %}<button class="button ghost danger" type="submit">Remove</button></form></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No rules. Use “Ignore…” on any finding in a comparison report.</p>
+{% endif %}
+{% endblock %}

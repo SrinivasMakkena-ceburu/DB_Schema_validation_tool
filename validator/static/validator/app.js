@@ -144,3 +144,16 @@
     setTimeout(poll, 800);
   }
 })();
+
+(function () {
+  // Compare form: show the fields for the chosen mode.
+  var sw = document.querySelector("[data-mode-switch]");
+  if (!sw) return;
+  var apply = function () {
+    var checked = sw.querySelector("input:checked");
+    var mode = checked ? checked.value : "branch";
+    document.querySelectorAll("[data-mode]").forEach(function (el) { el.hidden = el.dataset.mode !== mode; });
+  };
+  sw.addEventListener("change", apply);
+  apply();
+})();

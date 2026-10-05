@@ -2,7 +2,7 @@ from pathlib import Path
 
 from django import forms
 
-from .models import CleanupRecipe, DatabaseTarget, Project
+from .models import CleanupRecipe, DatabaseTarget, IgnoreRule, Project
 
 
 class ProjectForm(forms.ModelForm):
@@ -62,10 +62,17 @@ class DatabaseForm(forms.ModelForm):
 
 
 class ComparisonForm(forms.Form):
-    project = forms.ModelChoiceField(queryset=Project.objects.all(), empty_label=None)
+    mode = forms.ChoiceField(
+        choices=[("branch", "Branch → databases"), ("db", "Database → databases")],
+        initial="branch", required=False, widget=forms.RadioSelect,
+    )
+    project = forms.ModelChoiceField(queryset=Project.objects.all(), required=False, empty_label=None)
+    reference = forms.ModelChoiceField(queryset=DatabaseTarget.objects.all(), required=False,
+                                       label="Reference database", empty_label="— pick —")
     databases = forms.ModelMultipleChoiceField(
         queryset=DatabaseTarget.objects.all(), widget=forms.CheckboxSelectMultiple
     )
+    refresh_models = forms.BooleanField(required=False, label="Re-read the models even if the checkout is unchanged")
     history_strategy = forms.ChoiceField(
         choices=[
             ("fake", "Fake-apply the branch's migrations (the schema SQL brings the database to the branch)"),
@@ -77,6 +84,18 @@ class ComparisonForm(forms.Form):
     include_other_apps = forms.BooleanField(
         required=False, label="Also delete history rows of apps that are not in this branch"
     )
+
+    def clean(self):
+        data = super().clean()
+        data["mode"] = data.get("mode") or "branch"
+        if data["mode"] == "db":
+            if not data.get("reference"):
+                self.add_error("reference", "Pick the reference database.")
+            elif data.get("reference") in (data.get("databases") or []):
+                self.add_error("databases", "The reference database cannot also be compared with itself.")
+        elif not data.get("project"):
+            self.add_error("project", "Pick a project.")
+        return data
 
     def options(self):
         return {
@@ -98,3 +117,18 @@ class RecipeForm(forms.ModelForm):
         if not 1 <= size <= 100_000:
             raise forms.ValidationError("Use a batch size between 1 and 100000.")
         return size
+
+
+class IgnoreRuleForm(forms.ModelForm):
+    class Meta:
+        model = IgnoreRule
+        fields = ["database", "project", "category", "pattern", "note"]
+        labels = {"category": "Kind of finding"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .templatetags.validator_tags import CATEGORIES
+
+        self.fields["category"] = forms.ChoiceField(
+            required=False, label="Kind of finding",
+            choices=[("", "Any")] + [(key, label) for key, (label, _) in CATEGORIES.items()])
