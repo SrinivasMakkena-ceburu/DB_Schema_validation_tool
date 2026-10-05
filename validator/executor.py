@@ -34,6 +34,19 @@ def connect_for_writes(conninfo, timeout_s):
         raise OperationError(f"Cannot connect for writing: {exc}") from exc
 
 
+def connect_for_preview(conninfo, timeout_s):
+    """A session for previews: may create temp tables, and the caller always rolls back."""
+    try:
+        return psycopg.connect(
+            **conninfo,
+            connect_timeout=10,
+            application_name="schemasync-preview",
+            options=f"-c lock_timeout=5000 -c statement_timeout={int(timeout_s) * 1000}",
+        )
+    except psycopg.Error as exc:
+        raise OperationError(f"Cannot connect: {exc}") from exc
+
+
 def plan_signature(plan_result):
     """What the user confirmed: rows deleted per table and columns nulled."""
     return {

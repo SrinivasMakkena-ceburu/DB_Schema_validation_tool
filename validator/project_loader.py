@@ -1,4 +1,5 @@
 """Run extractor.py with a project's own interpreter and read its JSON."""
+import hashlib
 import json
 import os
 import re
@@ -70,3 +71,37 @@ def load_project(project):
                 details += "\n\n--- stdout ---\n" + proc.stdout.strip()[-4000:]
             raise ExtractorError(f"Extractor failed (exit code {proc.returncode})", details)
         return json.loads(output.read_text())
+
+
+def _git_state(project):
+    """(commit, hash of working-tree changes + project settings), or None outside git."""
+    def git(*args):
+        try:
+            proc = subprocess.run(["git", "-C", project.path, *args], capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return proc.stdout if proc.returncode == 0 else None
+
+    commit = git("rev-parse", "HEAD")
+    status = git("status", "--porcelain", "--untracked-files=normal", ".")
+    if commit is None or status is None:
+        return None
+    fingerprint = "\n".join([status, project.python_path, project.settings_module, project.extra_env])
+    return commit.strip(), hashlib.sha256(fingerprint.encode()).hexdigest()
+
+
+def load_project_cached(project, force=False):
+    """load_project(), reusing the last result while the checkout is unchanged."""
+    from .models import ProjectSnapshot
+
+    state = _git_state(project)
+    if state and not force:
+        snapshot = ProjectSnapshot.objects.filter(project=project, commit=state[0], status_hash=state[1]).first()
+        if snapshot:
+            return snapshot.data
+    data = load_project(project)
+    if state:
+        ProjectSnapshot.objects.create(project=project, commit=state[0], status_hash=state[1], data=data)
+        keep = ProjectSnapshot.objects.filter(project=project).values_list("pk", flat=True)[:5]
+        ProjectSnapshot.objects.filter(project=project).exclude(pk__in=list(keep)).delete()
+    return data

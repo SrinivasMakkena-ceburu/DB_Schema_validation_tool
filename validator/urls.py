@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import views, views_data
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
@@ -19,4 +19,5 @@ urlpatterns = [
     path("databases/<int:pk>/edit/", views.database_form, name="database_edit"),
     path("databases/<int:pk>/test/", views.database_test, name="database_test"),
     path("databases/<int:pk>/delete/", views.delete_object, {"kind": "database"}, name="database_delete"),
+    path("ops/<int:pk>/", views_data.op_detail, name="op_detail"),
 ]
