@@ -5,6 +5,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.urls import reverse
+import psycopg
 from django.utils import timezone
 from psycopg import sql
 
@@ -69,6 +70,8 @@ def preview_operation(op):
         op.planned_at = timezone.now()
     except (OperationError, PlanError, FilterError, InspectError, ExtractorError, DecryptError) as exc:
         op.status, op.error = "error", str(exc)
+    except psycopg.Error as exc:  # timeouts, lock waits, permissions: report, never leave it "planning"
+        op.status, op.error = "error", f"The database refused the preview: {str(exc).strip() or type(exc).__name__}"
     op.save()
     return op
 
@@ -116,6 +119,15 @@ def check_executable(op, typed, backup_ack):
     return errors
 
 
+def claim_for_execution(op, typed):
+    """Atomically move a planned operation to running; False if another request got there first."""
+    from .models import DataOperation
+
+    claimed = DataOperation.objects.filter(pk=op.pk, status="planned").update(
+        status="running", confirmation=typed, executed_at=timezone.now())
+    return claimed == 1
+
+
 def _merge(total, counts):
     for kind in ("deleted", "nulled"):
         for key, n in counts.get(kind, {}).items():
@@ -126,7 +138,8 @@ def run_operation(op, job):
     """Execute a previewed, confirmed operation (called inside a Job)."""
     op.status, op.job, op.executed_at = "running", job, timezone.now()
     op.save(update_fields=["status", "job", "executed_at"])
-    backup_root = Path(settings.BACKUP_DIR) / f"op-{op.pk}"
+    # A fresh folder per execution: never mixed with (or mistaken for) an earlier one.
+    backup_root = Path(settings.BACKUP_DIR) / f"op-{op.pk}-{timezone.now():%Y%m%d-%H%M%S-%f}"
     log = []
     database = op.database
     try:

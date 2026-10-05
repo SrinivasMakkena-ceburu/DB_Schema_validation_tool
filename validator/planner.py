@@ -1,6 +1,7 @@
 """Work out exactly which rows a delete reaches, inside the caller's transaction.
 
-Rows are tracked by ctid in two temporary tables (pg_temp._ss_del and
+Rows are tracked by (tableoid, ctid) — ctid alone repeats across the partitions
+of a partitioned table — in two temporary tables (pg_temp._ss_del and
 pg_temp._ss_null, dropped at commit/rollback). The set grows round by round:
 round N follows every relation out of the rows added in round N-1, so cycles
 and rows reachable through several paths are handled (each row is added once).
@@ -28,13 +29,15 @@ def _deleted_parents(graph, rel, depth=None):
     """SELECT of the parent column values of deleted parent rows (optionally one round only)."""
     depth_filter = sql.SQL(" AND d.depth = {}").format(sql.Literal(depth)) if depth is not None else sql.SQL("")
     return sql.SQL(
-        "SELECT p.{pcol} FROM {parent} p JOIN {del} d ON d.tbl = {ptbl} AND d.rid = p.ctid{depth}"
+        "SELECT p.{pcol} FROM {parent} p JOIN {del} d ON d.tbl = {ptbl} AND d.toid = p.tableoid "
+        "AND d.rid = p.ctid{depth}"
     ).format(pcol=sql.Identifier(rel.parent_column), parent=qualified(graph, rel.parent_table),
              ptbl=sql.Literal(rel.parent_table), depth=depth_filter, **{"del": DEL})
 
 
 def _not_deleted(alias, table):
-    return sql.SQL("NOT EXISTS (SELECT 1 FROM {del} x WHERE x.tbl = {tbl} AND x.rid = {alias}.ctid)").format(
+    return sql.SQL("NOT EXISTS (SELECT 1 FROM {del} x WHERE x.tbl = {tbl} AND x.toid = {alias}.tableoid "
+                   "AND x.rid = {alias}.ctid)").format(
         tbl=sql.Literal(table), alias=sql.Identifier(alias), **{"del": DEL})
 
 
@@ -62,16 +65,17 @@ def _expand(conn, graph, rel, depth, ct_ids):
     """Add rows reached through `rel` from the rows added in round `depth`."""
     if rel.action == PARENT_LINK:
         query = sql.SQL(
-            "INSERT INTO {del} (tbl, rid, depth, via) SELECT {ptbl}, p.ctid, {d}, {via} FROM {parent} p "
-            "WHERE p.{pcol} IN (SELECT c.{ccol} FROM {child} c JOIN {del} d ON d.tbl = {ctbl} AND d.rid = c.ctid "
-            "AND d.depth = {depth}) AND {fresh}"
+            "INSERT INTO {del} (tbl, toid, rid, depth, via) SELECT {ptbl}, p.tableoid, p.ctid, {d}, {via} "
+            "FROM {parent} p WHERE p.{pcol} IN (SELECT c.{ccol} FROM {child} c JOIN {del} d ON d.tbl = {ctbl} "
+            "AND d.toid = c.tableoid AND d.rid = c.ctid AND d.depth = {depth}) AND {fresh}"
         ).format(ptbl=sql.Literal(rel.parent_table), d=sql.Literal(depth + 1), via=sql.Literal(rel.id),
                  parent=qualified(graph, rel.parent_table), pcol=sql.Identifier(rel.parent_column),
                  ccol=sql.Identifier(rel.child_column), child=qualified(graph, rel.child_table),
                  ctbl=sql.Literal(rel.child_table), depth=sql.Literal(depth),
                  fresh=_not_deleted("p", rel.parent_table), **{"del": DEL})
     else:
-        query = sql.SQL("INSERT INTO {del} (tbl, rid, depth, via) SELECT {ctbl}, c.ctid, {d}, {via} {ref} AND {fresh}").format(
+        query = sql.SQL("INSERT INTO {del} (tbl, toid, rid, depth, via) "
+                        "SELECT {ctbl}, c.tableoid, c.ctid, {d}, {via} {ref} AND {fresh}").format(
             ctbl=sql.Literal(rel.child_table), d=sql.Literal(depth + 1), via=sql.Literal(rel.id),
             ref=_referencing(graph, rel, depth=depth, content_type_id=ct_ids.get(rel.content_type)),
             fresh=_not_deleted("c", rel.child_table), **{"del": DEL})
@@ -94,15 +98,15 @@ def plan(conn, graph, root_table, where, *, limit=None, samples=5):
         raise PlanError(f"Table {root_table} is not in this database")
 
     conn.execute("DROP TABLE IF EXISTS pg_temp._ss_del, pg_temp._ss_null")
-    conn.execute("CREATE TEMP TABLE _ss_del (tbl text NOT NULL, rid tid NOT NULL, depth int NOT NULL, via text) "
-                 "ON COMMIT DROP")
-    conn.execute("CREATE INDEX ON pg_temp._ss_del (tbl, rid)")
-    conn.execute("CREATE TEMP TABLE _ss_null (tbl text NOT NULL, rid tid NOT NULL, col text NOT NULL, "
-                 "via text NOT NULL) ON COMMIT DROP")
+    conn.execute("CREATE TEMP TABLE _ss_del (tbl text NOT NULL, toid oid NOT NULL, rid tid NOT NULL, "
+                 "depth int NOT NULL, via text) ON COMMIT DROP")
+    conn.execute("CREATE INDEX ON pg_temp._ss_del (tbl, toid, rid)")
+    conn.execute("CREATE TEMP TABLE _ss_null (tbl text NOT NULL, toid oid NOT NULL, rid tid NOT NULL, "
+                 "col text NOT NULL, via text NOT NULL) ON COMMIT DROP")
 
     limit_sql = sql.SQL(" LIMIT {}").format(sql.Literal(int(limit))) if limit else sql.SQL("")
     root_count = conn.execute(sql.SQL(
-        "INSERT INTO {del} (tbl, rid, depth) SELECT {tbl}, ctid, 0 FROM {root} WHERE {where}{limit}"
+        "INSERT INTO {del} (tbl, toid, rid, depth) SELECT {tbl}, tableoid, ctid, 0 FROM {root} WHERE {where}{limit}"
     ).format(tbl=sql.Literal(root_table), root=qualified(graph, root_table), where=where, limit=limit_sql,
              **{"del": DEL})).rowcount
 
@@ -135,8 +139,8 @@ def plan(conn, graph, root_table, where, *, limit=None, samples=5):
     for rel in touched:
         if rel.action == SET_NULL:
             if graph.tables[rel.child_table]["columns"][rel.child_column]["nullable"]:
-                conn.execute(sql.SQL("INSERT INTO {nul} (tbl, rid, col, via) SELECT {ctbl}, c.ctid, {col}, {via} "
-                                     "{ref} AND {fresh}").format(
+                conn.execute(sql.SQL("INSERT INTO {nul} (tbl, toid, rid, col, via) "
+                                     "SELECT {ctbl}, c.tableoid, c.ctid, {col}, {via} {ref} AND {fresh}").format(
                     nul=NUL, ctbl=sql.Literal(rel.child_table), col=sql.Literal(rel.child_column),
                     via=sql.Literal(rel.id), ref=_referencing(graph, rel), fresh=_not_deleted("c", rel.child_table)))
                 continue
@@ -151,6 +155,7 @@ def plan(conn, graph, root_table, where, *, limit=None, samples=5):
             if orphan:
                 orphans.append(orphan)
     blockers = [b for b in blockers if b]
+    blockers += _hidden_fk_blockers(conn, graph, deleted_tables, samples)
 
     return {
         "root_table": root_table,
@@ -160,7 +165,7 @@ def plan(conn, graph, root_table, where, *, limit=None, samples=5):
         "nulls": [
             {"table": t, "column": c, "count": n, "relation": via}
             for t, c, via, n in conn.execute(sql.SQL(
-                "SELECT tbl, col, via, count(DISTINCT rid) FROM {} GROUP BY tbl, col, via ORDER BY tbl, col"
+                "SELECT tbl, col, via, count(DISTINCT (toid, rid)) FROM {} GROUP BY tbl, col, via ORDER BY tbl, col"
             ).format(NUL))
         ],
         "blockers": blockers,
@@ -183,6 +188,60 @@ def _blocker(conn, graph, rel, samples, note=""):
             "table": rel.child_table, "count": count, "samples": rows}
 
 
+_INCOMING_FKS = """
+SELECT cn.nspname, c.relname, con.confdeltype,
+  ARRAY(SELECT a.attname FROM unnest(con.conkey) WITH ORDINALITY k(n, o)
+        JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.n ORDER BY k.o),
+  p.relname,
+  ARRAY(SELECT a.attname FROM unnest(con.confkey) WITH ORDINALITY k(n, o)
+        JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.n ORDER BY k.o)
+FROM pg_constraint con
+JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace cn ON cn.oid = c.relnamespace
+JOIN pg_class p ON p.oid = con.confrelid JOIN pg_namespace pn ON pn.oid = p.relnamespace
+WHERE con.contype = 'f' AND con.conparentid = 0 AND NOT c.relispartition
+  AND pn.nspname = %(schema)s AND p.relname = ANY(%(tables)s)
+ORDER BY 1, 2
+"""
+_HIDDEN_NOTES = {
+    "c": "ON DELETE CASCADE in the database, on a foreign key the planner cannot follow "
+         "(another schema or several columns): those rows would be deleted without preview or backup",
+    "n": "ON DELETE SET NULL in the database, on a foreign key the planner cannot follow "
+         "(another schema or several columns)",
+}
+
+
+def _hidden_fk_blockers(conn, graph, deleted_tables, samples):
+    """Foreign keys into the delete set that graph.relations does not cover (other schemas, composite keys)."""
+    if not deleted_tables:
+        return []
+    followed = {(rel.child_table, rel.child_column, rel.parent_table) for rel in graph.relations}
+    out = []
+    for nsp, child, action, cols, parent, pcols in conn.execute(
+            _INCOMING_FKS, {"schema": graph.schema, "tables": sorted(deleted_tables)}):
+        if nsp == graph.schema and len(cols) == 1 and (child, cols[0], parent) in followed:
+            continue
+        ref = sql.SQL(
+            "FROM {child} c WHERE ({ccols}) IN (SELECT {pcols} FROM {parent} p JOIN {del} d ON d.tbl = {ptbl} "
+            "AND d.toid = p.tableoid AND d.rid = p.ctid)"
+        ).format(child=sql.Identifier(nsp, child),
+                 ccols=sql.SQL(", ").join(sql.SQL("c.{}").format(sql.Identifier(x)) for x in cols),
+                 pcols=sql.SQL(", ").join(sql.SQL("p.{}").format(sql.Identifier(x)) for x in pcols),
+                 parent=qualified(graph, parent), ptbl=sql.Literal(parent), **{"del": DEL})
+        count = conn.execute(sql.SQL("SELECT count(*) {}").format(ref)).fetchone()[0]
+        if not count:
+            continue
+        table = child if nsp == graph.schema else f"{nsp}.{child}"
+        rows = [r[0] for r in conn.execute(sql.SQL("SELECT row_to_json(c) {} LIMIT {}").format(
+            ref, sql.Literal(samples)))]
+        out.append({
+            "relation": f"{table}({', '.join(cols)}) -> {parent}({', '.join(pcols)})",
+            "action": "block", "source": "db-hidden", "table": table, "count": count, "samples": rows,
+            "note": _HIDDEN_NOTES.get(action, "database foreign key the planner cannot follow "
+                                              "(another schema or several columns)"),
+        })
+    return out
+
+
 def _table_summary(conn, graph, samples):
     via = {}
     for tbl, rel_id, count in conn.execute(sql.SQL(
@@ -193,7 +252,8 @@ def _table_summary(conn, graph, samples):
     for tbl, count, depth, max_depth in conn.execute(sql.SQL(
             "SELECT tbl, count(*), min(depth), max(depth) FROM {} GROUP BY tbl ORDER BY min(depth), tbl").format(DEL)):
         rows = [r[0] for r in conn.execute(sql.SQL(
-            "SELECT row_to_json(t) FROM {table} t WHERE t.ctid IN (SELECT rid FROM {del} WHERE tbl = {tbl} LIMIT {n})"
+            "SELECT row_to_json(t) FROM {table} t WHERE (t.tableoid, t.ctid) IN "
+            "(SELECT toid, rid FROM {del} WHERE tbl = {tbl} LIMIT {n})"
         ).format(table=qualified(graph, tbl), tbl=sql.Literal(tbl), n=sql.Literal(samples), **{"del": DEL}))]
         out.append({
             "table": tbl, "count": count, "depth": depth, "max_depth": max_depth,

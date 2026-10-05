@@ -33,13 +33,32 @@ class FilterError(ValueError):
     pass
 
 
-def _is_temporal(type_name):
-    return any(word in type_name for word in ("timestamp", "date", "time"))
+MAX_DAYS = 1_000_000
+# Without its modifier these would mean length 1: use the unbounded spelling.
+_UNBOUNDED = {"character": "bpchar", "bit": "varbit"}
+
+
+def _is_date_like(type_name):
+    return type_name.startswith("timestamp") or type_name == "date"
+
+
+def _unbounded(type_name):
+    """The type without length/precision, so a cast never truncates or rounds the value.
+
+    'ABCDEFGH'::varchar(5) is 'ABCDE' and 1.239::numeric(10,2) is 1.24 — a filter
+    must not match a different row than the one typed.
+    """
+    base = re.sub(r"\(\d+(,\s*\d+)?\)", "", type_name).strip()
+    array = ""
+    while base.endswith("[]"):
+        array += "[]"
+        base = base[:-2].strip()
+    return _UNBOUNDED.get(base, base) + array
 
 
 def _cast(value, type_name):
     if _SAFE_TYPE.match(type_name or ""):
-        return sql.SQL("CAST({} AS {})").format(sql.Literal(value), sql.SQL(type_name))
+        return sql.SQL("CAST({} AS {})").format(sql.Literal(value), sql.SQL(_unbounded(type_name)))
     return sql.Literal(value)
 
 
@@ -68,17 +87,17 @@ def _condition(columns, f):
                                           _cast(value, type_name))
     if op == "in":
         items = [v.strip() for v in value.split(",") if v.strip()]
-        target = f"{type_name}[]" if _SAFE_TYPE.match(type_name) and "[]" not in type_name else "text[]"
+        target = f"{_unbounded(type_name)}[]" if _SAFE_TYPE.match(type_name) and "[]" not in type_name else "text[]"
         return sql.SQL("{} = ANY(CAST({} AS {}))").format(_column_expr(column, type_name), sql.Literal(items),
                                                          sql.SQL(target))
     if op == "contains":
         escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         return sql.SQL("CAST({} AS text) ILIKE {}").format(col, sql.Literal(f"%{escaped}%"))
     # older_than_days / newer_than_days
-    if not _is_temporal(type_name):
+    if not _is_date_like(type_name):
         raise FilterError(f"'{OPERATORS[op]}' only works on date/time columns; {column} is {type_name}")
-    if not value.isdigit():
-        raise FilterError(f"'{OPERATORS[op]}' needs a whole number of days, got {value!r}")
+    if not value.isdigit() or int(value) > MAX_DAYS:
+        raise FilterError(f"'{OPERATORS[op]}' needs a whole number of days (up to {MAX_DAYS}), got {value!r}")
     compare = "<" if op == "older_than_days" else ">="
     return sql.SQL("{} {} now() - make_interval(days => {})").format(col, sql.SQL(compare), sql.Literal(int(value)))
 
@@ -99,6 +118,9 @@ def validate_filters(conn, table_ident, columns, filters):
     except psycopg.errors.DataError as exc:
         detail = str(exc).splitlines()[0]
         raise FilterError(f"A value is not valid for {_guess_column(filters, exc) or 'its column'}: {detail}") from exc
+    except psycopg.Error as exc:
+        detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        raise FilterError(f"This filter cannot be used on these columns: {detail}") from exc
     return where
 
 

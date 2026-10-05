@@ -133,7 +133,7 @@
       <p><strong>Writes are not enabled for this database.</strong> This is a preview only. Enable writes on the <a href="{% url 'database_list' %}">database settings</a> to run it.</p>
     {% else %}
       <ul class="safety">
-        <li>Every affected row is backed up to <span class="mono">data/backups/op-{{ op.pk }}/</span> first, with a restore script.</li>
+        <li>Every affected row is backed up to a new folder <span class="mono">data/backups/op-{{ op.pk }}-…/</span> first, with a restore script.</li>
         <li>It runs in {% if op.kind == "cleanup" %}one transaction per batch{% else %}one transaction{% endif %}; if the row counts differ from this preview, nothing is changed.</li>
         <li>The preview expires {{ plan_max_age }} minutes after it was made.</li>
       </ul>

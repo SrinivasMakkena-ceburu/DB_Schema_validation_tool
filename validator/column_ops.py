@@ -97,12 +97,18 @@ def plan_drop_column(conninfo, schema, table, column, extracted=None):
 
 def execute_drop_column(conninfo, schema, table, column, *, backup_dir, timeout_s, log):
     backup_dir = Path(backup_dir)
+    created = False
     with connect_for_writes(conninfo, timeout_s) as conn:
         try:
+            # Lock first: rows written between the backup and the DROP would otherwise be lost unbacked.
+            lock = sql.SQL("LOCK TABLE {} IN ACCESS EXCLUSIVE MODE").format(sql.Identifier(schema, table))
+            log.append(lock.as_string(conn))
+            conn.execute(lock)
             info = _describe(conn, schema, table, column)
             if info["blockers"]:
                 raise OperationError("Cannot drop column: " + "; ".join(info["blockers"]))
             backup_dir.mkdir(parents=True, exist_ok=False)
+            created = True
             fields = sql.SQL(", ").join(sql.SQL("{}, x.{}").format(sql.Literal(c), sql.Identifier(c))
                                         for c in info["pk"] + [column])
             query = sql.SQL("COPY (SELECT json_build_object({})::text FROM {} x) TO STDOUT").format(
@@ -123,7 +129,8 @@ def execute_drop_column(conninfo, schema, table, column, *, backup_dir, timeout_
             conn.commit()
         except BaseException as exc:
             conn.rollback()
-            shutil.rmtree(backup_dir, ignore_errors=True)
+            if created:  # never remove a folder this call did not create
+                shutil.rmtree(backup_dir, ignore_errors=True)
             if isinstance(exc, psycopg.Error):
                 raise OperationError(str(exc).strip()) from exc
             raise

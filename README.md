@@ -115,7 +115,8 @@ in the database), pick a database and a table, filter, then **Preview delete**
 
 The preview shows every table and row count the delete reaches, columns that
 will be set to NULL, and **blockers** (PROTECT/RESTRICT rows, `SET_DEFAULT`,
-foreign keys that exist only in the database). A database-only foreign key
+foreign keys that exist only in the database, and foreign keys from other
+schemas or on several columns that would cascade without a preview). A database-only foreign key
 can be ticked to be treated as cascade. Then:
 
 1. **Rehearsal** — the delete runs in a transaction that is rolled back, so
@@ -125,7 +126,10 @@ can be ticked to be treated as cascade. Then:
    acknowledgement. Previews expire after 15 minutes.
 3. **Execute** — in one transaction: the plan is computed again and must match
    the preview exactly (otherwise nothing changes); every affected row is
-   written to `data/backups/op-<id>/`; then rows are nulled and deleted.
+   written to a new `data/backups/op-<id>-<timestamp>/` folder; then rows are nulled and deleted.
+   Before commit, PostgreSQL's own per-transaction counters are checked: if a
+   trigger or a database-level cascade the preview could not see changed any
+   other row, everything is rolled back.
 4. **Restore** — the operation page offers a restore script that re-inserts
    the rows (parents first) and restores nulled values. Run it with `psql` if
    you need to undo.
@@ -153,8 +157,8 @@ JSON. The tool reads the target database's catalog with psycopg in a
 report. Importing the backend runs its settings and app code, as `manage.py`
 would.
 
-Data operations track rows by `ctid` in temporary tables inside one
-transaction: a planner expands the delete round by round over model relations
+Data operations track rows by `(tableoid, ctid)` (so partitioned tables are
+handled) in temporary tables inside one transaction: a planner expands the delete round by round over model relations
 (from the extractor) and database foreign keys, so cycles and rows reachable
 by several paths are handled once.
 

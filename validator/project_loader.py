@@ -74,20 +74,34 @@ def load_project(project):
 
 
 def _git_state(project):
-    """(commit, hash of working-tree changes + project settings), or None outside git."""
+    """(commit, hash of the working tree's actual changes + project settings), or None outside git.
+
+    The hash covers the content of uncommitted changes (git diff) and of untracked
+    files, so a second edit to an already-modified models.py is noticed.
+    """
     def git(*args):
         try:
-            proc = subprocess.run(["git", "-C", project.path, *args], capture_output=True, text=True, timeout=20)
+            proc = subprocess.run(["git", "-C", project.path, *args], capture_output=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired):
             return None
         return proc.stdout if proc.returncode == 0 else None
 
     commit = git("rev-parse", "HEAD")
-    status = git("status", "--porcelain", "--untracked-files=normal", ".")
-    if commit is None or status is None:
+    diff = git("diff", "HEAD", "--no-ext-diff", "--binary", "--", ".")
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z", "--", ".")
+    if commit is None or diff is None or untracked is None:
         return None
-    fingerprint = "\n".join([status, project.python_path, project.settings_module, project.extra_env])
-    return commit.strip(), hashlib.sha256(fingerprint.encode()).hexdigest()
+    digest = hashlib.sha256()
+    digest.update(diff)
+    for name in sorted(n for n in untracked.split(b"\0") if n):
+        digest.update(name)
+        try:
+            with open(os.path.join(project.path, os.fsdecode(name)), "rb") as fh:
+                digest.update(fh.read(5_000_000))
+        except OSError:
+            digest.update(b"<unreadable>")
+    digest.update("\n".join([project.python_path, project.settings_module, project.extra_env]).encode())
+    return commit.decode().strip(), digest.hexdigest()
 
 
 def load_project_cached(project, force=False):

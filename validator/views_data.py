@@ -1,7 +1,9 @@
 """Data browser (read-only), data operations (delete / cleanup / drop column), recipes and jobs."""
 import re
 from pathlib import Path
+from urllib.parse import urlencode
 
+import psycopg
 from django.conf import settings
 from django.contrib import messages
 from django.http import FileResponse, Http404, JsonResponse, StreamingHttpResponse
@@ -132,10 +134,10 @@ def data_table(request, db, table):
             rows = [dict(zip(names, r)) for r in cursor.fetchall()]
             total = conn.execute(sql.SQL("SELECT count(*) FROM (SELECT 1 FROM {} WHERE {} LIMIT {}) s").format(
                 ident, where, sql.Literal(COUNT_CAP + 1))).fetchone()[0]
-    except FilterError as exc:
+    except (FilterError, InspectError) as exc:
         filter_error = str(exc)
-    except InspectError as exc:
-        filter_error = str(exc)
+    except psycopg.Error as exc:
+        filter_error = f"The database refused the query: {str(exc).strip() or type(exc).__name__}"
 
     has_next = len(rows) > PAGE_SIZE
     rows = rows[:PAGE_SIZE]
@@ -203,11 +205,11 @@ def data_row(request, db, table, pk):
                             sql.Identifier(rel.ct_column), sql.Literal(ct[0]), sql.Identifier(rel.child_column),
                             sql.Literal(str(value)))
                     n = conn.execute(sql.SQL("SELECT count(*) FROM {} WHERE {}").format(child, condition)).fetchone()[0]
-                    link = reverse("data_table", args=[database.pk, rel.child_table])
-                    link += f"?f_col={rel.child_column}&f_op=eq&f_val={value}"
+                    link = reverse("data_table", args=[database.pk, rel.child_table]) + "?" + urlencode(
+                        {"f_col": rel.child_column, "f_op": "eq", "f_val": value})
                     children.append({"table": rel.child_table, "column": rel.child_column, "count": n,
                                      "action": rel.action, "relation": rel.id, "link": link})
-    except InspectError as exc:
+    except (InspectError, FilterError, psycopg.Error) as exc:
         raise Http404(str(exc))
     fields = [(c, ("••••••" if SECRET_COLUMN.search(c) and not reveal and row[c] is not None else row[c]))
               for c in names]
@@ -273,8 +275,9 @@ def op_detail(request, pk):
 @require_POST
 def op_repreview(request, pk):
     op = get_object_or_404(DataOperation, pk=pk)
-    if op.status in ("running", "done"):
-        messages.error(request, f"This operation is {op.status}.")
+    if op.status in ("running", "done") or op.executed_at:
+        messages.error(request, "This operation already ran, so it cannot be previewed again: its backups and "
+                                "counts belong to that run. Start a new operation from the table.")
         return redirect("op_detail", pk=op.pk)
     op.cascade_overrides = request.POST.getlist("override")
     op.status = "planning"
@@ -292,8 +295,10 @@ def op_execute(request, pk):
         for error in errors:
             messages.error(request, error)
         return redirect("op_detail", pk=op.pk)
-    op.confirmation = typed
-    op.save(update_fields=["confirmation"])
+    if not operations.claim_for_execution(op, typed):
+        messages.error(request, "This operation is already running or finished.")
+        return redirect("op_detail", pk=op.pk)
+    op.refresh_from_db()
     job = start_job(op.kind, str(op), lambda job: operations.run_operation(op, job))
     return redirect(job.result_url or reverse("job_detail", args=[job.pk]))
 

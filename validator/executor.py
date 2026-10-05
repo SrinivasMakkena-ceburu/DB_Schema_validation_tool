@@ -63,29 +63,43 @@ def _deletion_order(conn):
 
 
 def _apply(conn, graph, log):
-    """Null, then delete, using the temp tables left by plan(). Returns counts."""
+    """Null, then delete, using the temp tables left by plan(). Returns counts.
+
+    Afterwards every row change this transaction made is checked against the
+    plan (pg_stat_xact_user_tables), so database-level cascades or triggers that
+    touched other rows abort the operation instead of committing unseen changes.
+    """
     conn.execute("SET CONSTRAINTS ALL DEFERRED")
     counts = {"deleted": {}, "nulled": {}}
+    expected_updates = {}
     null_cols = {}
     for tbl, col in conn.execute(sql.SQL("SELECT DISTINCT tbl, col FROM {} ORDER BY tbl, col").format(NUL)):
         null_cols.setdefault(tbl, []).append(col)
     for tbl, cols in null_cols.items():
         # One UPDATE per table: an UPDATE moves the row, so its old ctid is only valid once.
         assignments = sql.SQL(", ").join(
-            sql.SQL("{col} = CASE WHEN ctid IN (SELECT rid FROM {nul} WHERE tbl = {tbl} AND col = {c}) "
-                    "THEN NULL ELSE {col} END").format(col=sql.Identifier(c), nul=NUL, tbl=sql.Literal(tbl),
-                                                       c=sql.Literal(c))
+            sql.SQL("{col} = CASE WHEN (tableoid, ctid) IN (SELECT toid, rid FROM {nul} WHERE tbl = {tbl} "
+                    "AND col = {c}) THEN NULL ELSE {col} END").format(
+                col=sql.Identifier(c), nul=NUL, tbl=sql.Literal(tbl), c=sql.Literal(c))
             for c in cols)
-        query = sql.SQL("UPDATE {table} SET {assignments} WHERE ctid IN (SELECT rid FROM {nul} WHERE tbl = {tbl})").format(
+        query = sql.SQL("UPDATE {table} SET {assignments} WHERE (tableoid, ctid) IN "
+                        "(SELECT toid, rid FROM {nul} WHERE tbl = {tbl})").format(
             table=qualified(graph, tbl), assignments=assignments, nul=NUL, tbl=sql.Literal(tbl))
+        planned = conn.execute(sql.SQL("SELECT count(DISTINCT (toid, rid)) FROM {} WHERE tbl = %s").format(NUL),
+                               [tbl]).fetchone()[0]
         log.append(query.as_string(conn))
-        conn.execute(query)
+        updated = conn.execute(query).rowcount
+        if updated != planned:
+            raise OperationError(f"{tbl}: planned to set NULL in {planned} rows but updated {updated}; "
+                                 "rows changed meanwhile")
+        expected_updates[tbl] = updated
         for c in cols:
             counts["nulled"][f"{tbl}.{c}"] = conn.execute(sql.SQL(
-                "SELECT count(DISTINCT rid) FROM {} WHERE tbl = %s AND col = %s").format(NUL), [tbl, c]).fetchone()[0]
+                "SELECT count(DISTINCT (toid, rid)) FROM {} WHERE tbl = %s AND col = %s").format(NUL),
+                [tbl, c]).fetchone()[0]
     for tbl in _deletion_order(conn):
         planned = conn.execute(sql.SQL("SELECT count(*) FROM {} WHERE tbl = %s").format(DEL), [tbl]).fetchone()[0]
-        query = sql.SQL("DELETE FROM {table} WHERE ctid IN (SELECT rid FROM {del} WHERE tbl = {tbl})").format(
+        query = sql.SQL("DELETE FROM {table} WHERE (tableoid, ctid) IN (SELECT toid, rid FROM {del} WHERE tbl = {tbl})").format(
             table=qualified(graph, tbl), tbl=sql.Literal(tbl), **{"del": DEL})
         log.append(query.as_string(conn))
         deleted = conn.execute(query).rowcount
@@ -94,7 +108,37 @@ def _apply(conn, graph, log):
         counts["deleted"][tbl] = deleted
     # Check deferred foreign keys now, so a rehearsal sees what a commit would.
     conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
+    _verify_side_effects(conn, graph.schema, counts["deleted"], expected_updates)
     return counts
+
+
+_XACT_CHANGES = """
+SELECT rn.nspname, r.relname, sum(s.n_tup_del)::bigint, sum(s.n_tup_upd)::bigint
+FROM pg_stat_xact_user_tables s
+JOIN pg_class c ON c.oid = s.relid
+JOIN pg_class r ON r.oid = COALESCE(pg_partition_root(s.relid), s.relid)
+JOIN pg_namespace rn ON rn.oid = r.relnamespace
+WHERE rn.nspname NOT LIKE 'pg_temp%%' AND rn.nspname NOT LIKE 'pg_toast%%'
+GROUP BY rn.nspname, r.relname
+HAVING sum(s.n_tup_del) > 0 OR sum(s.n_tup_upd) > 0
+"""
+
+
+def _verify_side_effects(conn, schema, deleted, updated):
+    surprises = []
+    for nsp, rel, n_del, n_upd in conn.execute(_XACT_CHANGES):
+        own = nsp == schema
+        want_del = deleted.get(rel, 0) if own else 0
+        want_upd = updated.get(rel, 0) if own else 0
+        if n_del != want_del:
+            surprises.append(f"{nsp}.{rel}: {n_del} row(s) deleted, preview had {want_del}")
+        if n_upd != want_upd:
+            surprises.append(f"{nsp}.{rel}: {n_upd} row(s) updated, preview had {want_upd}")
+    if surprises:
+        raise OperationError(
+            "The database changed rows the preview did not include (a trigger, or a foreign key with "
+            "ON DELETE CASCADE/SET NULL the planner could not follow): " + "; ".join(surprises)
+            + ". Nothing was changed.")
 
 
 def _blocked_message(plan_result):
@@ -122,23 +166,23 @@ def rehearse(conninfo, graph, root_table, where, *, timeout_s, limit=None):
 
 
 def _write_backup(conn, graph, plan_result, backup_dir):
-    backup_dir.mkdir(parents=True, exist_ok=False)
     manifest = {"schema": graph.schema, "created": timezone.now().isoformat(), "tables": {}, "nulls": []}
     for t in plan_result["tables"]:
         tbl = t["table"]
-        query = sql.SQL("COPY (SELECT row_to_json(x)::text FROM {table} x WHERE x.ctid IN "
-                        "(SELECT rid FROM {del} WHERE tbl = {tbl})) TO STDOUT").format(
+        query = sql.SQL("COPY (SELECT row_to_json(x)::text FROM {table} x WHERE (x.tableoid, x.ctid) IN "
+                        "(SELECT toid, rid FROM {del} WHERE tbl = {tbl})) TO STDOUT").format(
             table=qualified(graph, tbl), tbl=sql.Literal(tbl), **{"del": DEL})
         rows = _copy_to_file(conn, query, backup_dir / f"{tbl}.jsonl.gz")
-        manifest["tables"][tbl] = {"rows": rows, "depth": t["max_depth"], "pk": graph.tables[tbl]["pk"]}
+        manifest["tables"][tbl] = {"rows": rows, "depth": t["max_depth"], "pk": graph.tables[tbl]["pk"],
+                                   "columns": _insertable_columns(conn, graph, tbl)}
     for n in plan_result["nulls"]:
         tbl, col = n["table"], n["column"]
         pk = graph.tables[tbl]["pk"]
         entry = {"table": tbl, "column": col, "pk": pk, "file": f"_null.{tbl}.{col}.jsonl.gz", "rows": 0}
         if pk:
             fields = sql.SQL(", ").join(sql.SQL("{}, x.{}").format(sql.Literal(c), sql.Identifier(c)) for c in pk + [col])
-            query = sql.SQL("COPY (SELECT json_build_object({fields})::text FROM {table} x WHERE x.ctid IN "
-                            "(SELECT rid FROM {nul} WHERE tbl = {tbl} AND col = {col})) TO STDOUT").format(
+            query = sql.SQL("COPY (SELECT json_build_object({fields})::text FROM {table} x WHERE (x.tableoid, x.ctid) IN "
+                            "(SELECT toid, rid FROM {nul} WHERE tbl = {tbl} AND col = {col})) TO STDOUT").format(
                 fields=fields, table=qualified(graph, tbl), nul=NUL, tbl=sql.Literal(tbl), col=sql.Literal(col))
             entry["rows"] = _copy_to_file(conn, query, backup_dir / entry["file"])
         else:
@@ -146,6 +190,14 @@ def _write_backup(conn, graph, plan_result, backup_dir):
         manifest["nulls"].append(entry)
     (backup_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
+
+
+def _insertable_columns(conn, graph, table):
+    """Columns a restore may insert into (generated columns are computed by the database)."""
+    return [r[0] for r in conn.execute(
+        "SELECT a.attname FROM pg_attribute a WHERE a.attrelid = %s::regclass AND a.attnum > 0 "
+        "AND NOT a.attisdropped AND a.attgenerated = '' ORDER BY a.attnum",
+        [qualified(graph, table).as_string(conn)])]
 
 
 def _copy_to_file(conn, query, path):
@@ -160,6 +212,9 @@ def _copy_to_file(conn, query, path):
 def execute(conninfo, graph, root_table, where, *, expected, backup_dir, timeout_s, log, limit=None):
     """Plan, verify against `expected` (plan_signature of the preview), back up, delete, commit."""
     backup_dir = Path(backup_dir)
+    if backup_dir.exists():
+        raise OperationError(f"Backup folder {backup_dir} already exists; refusing to reuse it.")
+    created = False
     with connect_for_writes(conninfo, timeout_s) as conn:
         try:
             plan_result = plan(conn, graph, root_table, where, limit=limit, samples=0)
@@ -172,12 +227,15 @@ def execute(conninfo, graph, root_table, where, *, expected, backup_dir, timeout
             if plan_result["root_count"] == 0:
                 conn.rollback()
                 return {"root_count": 0, "counts": {"deleted": {}, "nulled": {}}, "backup": None}
+            backup_dir.mkdir(parents=True, exist_ok=False)
+            created = True
             _write_backup(conn, graph, plan_result, backup_dir)
             counts = _apply(conn, graph, log)
             conn.commit()
         except BaseException as exc:
             conn.rollback()
-            shutil.rmtree(backup_dir, ignore_errors=True)
+            if created:  # never remove a folder this call did not create
+                shutil.rmtree(backup_dir, ignore_errors=True)
             if isinstance(exc, psycopg.Error):
                 raise OperationError(str(exc).strip()) from exc
             raise
@@ -188,6 +246,10 @@ def _fmt(signature):
     parts = [f"{t}: {n}" for t, n in sorted(signature["delete"].items())]
     parts += [f"{c} → NULL: {n}" for c, n in sorted(signature["null"].items())]
     return ", ".join(parts)
+
+
+def _qi(name):
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _dollar(text):
@@ -221,9 +283,11 @@ def restore_script(backup_root):
         schema = manifest["schema"]
         yield f"\n-- from {directory.name}\n"
         for tbl, info in sorted(manifest["tables"].items(), key=lambda kv: (kv[1]["depth"], kv[0])):
-            target = f'"{schema}"."{tbl}"'
+            target = f"{_qi(schema)}.{_qi(tbl)}"
+            columns = ", ".join(_qi(c) for c in info["columns"]) if info.get("columns") else "*"
+            insert_cols = f" ({columns})" if info.get("columns") else ""
             for line in _read_lines(directory / f"{tbl}.jsonl.gz"):
-                yield (f"INSERT INTO {target} OVERRIDING SYSTEM VALUE SELECT * FROM "
+                yield (f"INSERT INTO {target}{insert_cols} OVERRIDING SYSTEM VALUE SELECT {columns} FROM "
                        f"json_populate_record(NULL::{target}, {_dollar(line)});\n")
         for entry in manifest["nulls"]:
             if not entry["pk"]:
