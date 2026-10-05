@@ -1,7 +1,9 @@
 # Schema Sync Validator
 
 A local Django web app that checks whether a Django branch and an
-environment's PostgreSQL database agree, and writes the SQL to make them agree.
+environment's PostgreSQL database agree, writes the SQL to make them agree,
+and — on databases you explicitly enable — deletes records and cleans up old
+rows with a cascade preview, typed confirmation, backup and restore script.
 
 It answers, per environment (stage, prod-eu, prod-us, …):
 
@@ -17,10 +19,24 @@ It answers, per environment (stage, prod-eu, prod-us, …):
   would report.
 
 For each database it generates a fix script (schema DDL + history rows) and
-the equivalent `manage.py` commands. **It never runs them.** Target databases
-are opened in read-only sessions.
+the equivalent `manage.py` commands. **It never runs them.** Comparisons and
+the data browser use read-only sessions.
 
-Design: [`docs/superpowers/specs/2026-10-04-schema-sync-validator-design.md`](docs/superpowers/specs/2026-10-04-schema-sync-validator-design.md)
+It also does:
+
+- **Database vs database** — e.g. stage as the reference, prod-eu and prod-us
+  as targets: schema and migration-history differences, no branch needed.
+- **Changes since the previous run** of the same comparison (new / resolved),
+  a **Re-run** button, and **ignore rules** for accepted drift.
+- **Data browser** (read-only): tables, filtered rows, a row's parents and
+  children. Secret-looking columns are masked.
+- **Data operations** (only on databases with *writes enabled*): delete a
+  record or any filtered set of rows with everything that cascades from it,
+  **cleanup recipes** run in batches (e.g. execution history older than 90
+  days), and **drop a column**.
+
+Design: [`docs/superpowers/specs/2026-10-04-schema-sync-validator-design.md`](docs/superpowers/specs/2026-10-04-schema-sync-validator-design.md),
+[`docs/superpowers/specs/2026-10-05-data-operations-and-improvements-design.md`](docs/superpowers/specs/2026-10-05-data-operations-and-improvements-design.md)
 
 ## Install and run
 
@@ -36,9 +52,12 @@ python -m venv .venv
 Open http://127.0.0.1:8000.
 
 Everything the tool stores lives in `data/` (git-ignored):
-`schemasync.sqlite3` (projects, databases, run history), `secret.key` (encrypts
-saved database passwords — keep it; losing it means re-entering passwords) and
-`django_secret.txt`. Set `SCHEMASYNC_DATA_DIR` to keep them elsewhere.
+`schemasync.sqlite3` (projects, databases, runs, operations), `secret.key`
+(encrypts saved database passwords — keep it; losing it means re-entering
+passwords), `django_secret.txt` and `backups/` (rows removed by operations).
+Set `SCHEMASYNC_DATA_DIR` to keep them elsewhere. Comparisons and operations
+run in the background with a progress page; restarting the server marks
+running jobs as interrupted.
 
 ## Use
 
@@ -87,6 +106,42 @@ Sections, inside one transaction:
 Review it, then run it yourself, for example
 `psql -v ON_ERROR_STOP=1 -f fix-prod-us-12.sql`.
 
+## Deleting and cleaning up data
+
+Open **Data**, pick the project whose models describe the database (its
+`on_delete` rules decide the cascade — Django does not put `ON DELETE CASCADE`
+in the database), pick a database and a table, filter, then **Preview delete**
+(or open a row and **Preview delete of this row**).
+
+The preview shows every table and row count the delete reaches, columns that
+will be set to NULL, and **blockers** (PROTECT/RESTRICT rows, `SET_DEFAULT`,
+foreign keys that exist only in the database). A database-only foreign key
+can be ticked to be treated as cascade. Then:
+
+1. **Rehearsal** — the delete runs in a transaction that is rolled back, so
+   constraint and trigger errors show up before anything changes.
+2. **Confirm** — type the phrase shown (e.g. `delete devices_customer 42 on
+   prod-us`; pasting is disabled). On a `prod` database also tick the backup
+   acknowledgement. Previews expire after 15 minutes.
+3. **Execute** — in one transaction: the plan is computed again and must match
+   the preview exactly (otherwise nothing changes); every affected row is
+   written to `data/backups/op-<id>/`; then rows are nulled and deleted.
+4. **Restore** — the operation page offers a restore script that re-inserts
+   the rows (parents first) and restores nulled values. Run it with `psql` if
+   you need to undo.
+
+**Cleanup recipes** (`Operations → Cleanup recipes`) save a table + filters +
+batch size. Running one previews the total and the first batch, then deletes
+batch by batch (each batch its own backed-up transaction) with live progress;
+it can be cancelled between batches. **Drop column** (from a table's danger
+zone) shows the values that will be lost, indexes/constraints dropped with
+it, warns if the branch's models still use the column, and refuses when a
+view or foreign key depends on it.
+
+Writes are **off by default** per database (`Databases → Edit → Writes
+enabled`); you can give a separate write user there. Every operation is kept
+in **Operations** with the typed confirmation, counts, SQL and backup.
+
 ## How it works
 
 `validator/extractor.py` is run with **the backend's own interpreter** from the
@@ -98,8 +153,14 @@ JSON. The tool reads the target database's catalog with psycopg in a
 report. Importing the backend runs its settings and app code, as `manage.py`
 would.
 
-Limits: PostgreSQL only; only the backend's `default` database alias is
-compared.
+Data operations track rows by `ctid` in temporary tables inside one
+transaction: a planner expands the delete round by round over model relations
+(from the extractor) and database foreign keys, so cycles and rows reachable
+by several paths are handled once.
+
+Limits: PostgreSQL 14+ only; only the backend's `default` database alias is
+compared; `post_delete` signals and file cleanup in your models do not run
+when the tool deletes rows.
 
 ## Tests
 
