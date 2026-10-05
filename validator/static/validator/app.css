@@ -333,3 +333,6 @@ pre.sample { font: 0.78rem/1.45 var(--mono); background: var(--code-bg); padding
 .row-action a:hover { color: var(--accent-ink); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .heading.row > div { margin-right: auto; }
+
+.result-panel .list.compact td.mono, .plan-panel .cascade td.mono { word-break: break-all; }
+@media (max-width: 860px) { .result-panel .list.compact { display: table; } }

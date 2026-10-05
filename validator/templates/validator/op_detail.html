@@ -60,6 +60,7 @@
 </section>
 {% elif plan and plan.tables is not None %}
 <section class="panel plan-panel">
+  {% if op.executed_at %}<h2>Preview made before running</h2>{% endif %}
   {% if op.kind == "cleanup" %}
     <p class="big-line"><strong>{{ plan.root_total }}</strong> rows of <span class="mono">{{ op.root_table }}</span> match, deleted in about <strong>{{ plan.batches }}</strong> batch{{ plan.batches|pluralize:"es" }} of {{ op.batch_size }}.</p>
     <p class="hint">The first batch is shown in detail; every batch is planned, backed up and committed on its own.</p>
@@ -118,6 +119,7 @@
   {% if op.rehearsal.skipped %}<p class="muted">{{ op.rehearsal.skipped }}.</p>
   {% elif op.rehearsal.ok %}<p class="ok-line">Passed: the delete ran inside a transaction that was rolled back ({{ op.rehearsal.duration_ms }} ms). Constraints and triggers accepted it.</p>
   {% elif op.rehearsal %}<div class="msg msg-error"><strong>Failed:</strong> <pre class="note">{{ op.rehearsal.error }}</pre></div>
+  {% elif op.status == "blocked" %}<p class="muted">Not run: resolve the blockers above first.</p>
   {% elif op.kind == "drop_column" %}<p class="muted">Not needed for a column drop: the backup and the drop run in one transaction.</p>{% endif %}
   <form method="post" action="{% url 'op_repreview' op.pk %}" class="row">{% csrf_token %}{% for o in op.cascade_overrides %}<input type="hidden" name="override" value="{{ o }}">{% endfor %}<button class="button ghost" type="submit">Preview again</button></form>
 </section>

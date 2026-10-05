@@ -5,7 +5,7 @@
   <tbody>
   {% for f in findings %}
     <tr data-severity="{{ f.severity }}" data-text="{{ f.app }} {{ f|finding_object }} {{ f.message }} {{ f.category }}">
-      <td class="gutter marker m-{{ f.category|marker_class }}" title="{{ f.category|category_label }}">{{ f.category|marker }}</td>
+      <td class="gutter marker m-{{ f.category|marker_class }}" title="{{ f.category|category_label:run.kind }}">{{ f.category|marker }}</td>
       <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
       <td class="mono">{{ f.app }}</td>
       <td class="mono">{{ f|finding_object }}</td>

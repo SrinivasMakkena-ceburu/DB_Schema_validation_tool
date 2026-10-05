@@ -37,7 +37,7 @@
   <tbody>
     {% for row in rows %}
       <tr>
-        <th scope="row"><span class="marker m-{{ row.category|marker_class }}" aria-hidden="true">{{ row.category|marker }}</span> {{ row.category|category_label }}</th>
+        <th scope="row"><span class="marker m-{{ row.category|marker_class }}" aria-hidden="true">{{ row.category|marker }}</span> {{ row.category|category_label:first.kind }}</th>
         {% for cell in row.cells %}
           <td>{% if cell %}{% if cell.error %}<span class="pill sev-error">{{ cell.error }}</span>{% endif %}{% if cell.warning %}<span class="pill sev-warning">{{ cell.warning }}</span>{% endif %}{% if cell.info %}<span class="pill sev-info">{{ cell.info }}</span>{% endif %}{% else %}<span class="dash">—</span>{% endif %}</td>
         {% endfor %}
@@ -56,5 +56,5 @@
   </section>
 {% endif %}{% endfor %}
 
-{% include "validator/_legend.html" %}
+{% include "validator/_legend.html" with kind=first.kind %}
 {% endblock %}

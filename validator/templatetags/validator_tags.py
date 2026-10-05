@@ -35,8 +35,19 @@ CATEGORIES = {
 CATEGORY_ORDER = list(CATEGORIES)
 
 
+# In a database-vs-database comparison the reference database plays the branch's role.
+DB_MODE_LABELS = {
+    "table_missing": "Table missing (in reference)",
+    "column_missing": "Column missing (in reference)",
+    "table_extra": "Table not in reference",
+    "column_extra": "Column not in reference",
+}
+
+
 @register.filter
-def category_label(category):
+def category_label(category, kind=""):
+    if kind == "db" and category in DB_MODE_LABELS:
+        return DB_MODE_LABELS[category]
     return CATEGORIES.get(category, (category, ""))[0]
 
 
